@@ -112,6 +112,7 @@ func (ps *PlayerSession) Send(msg ServerMessage) {
 		log.Printf("序列化消息失败: %v", err)
 		return
 	}
+	log.Printf("发送消息: type=%s, len=%d", msg.Type, len(data))
 	if err := ps.conn.WriteMessage(websocket.TextMessage, data); err != nil {
 		log.Printf("发送消息失败: %v", err)
 	}
@@ -202,7 +203,15 @@ func (s *DemoServer) handleWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		s.handleMessage(session, msg)
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("处理消息 panic: %v", r)
+					session.Send(ServerMessage{Type: MsgError, Data: "服务器内部错误"})
+				}
+			}()
+			s.handleMessage(session, msg)
+		}()
 	}
 }
 

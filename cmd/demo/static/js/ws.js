@@ -27,17 +27,23 @@ class WS {
       this.conn.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
+          console.log('收到服务端消息:', msg.type, msg.data);
           this.emit(msg.type, msg.data);
         } catch (err) {
-          console.error('消息解析失败', err);
+          console.error('消息解析失败', err, e.data);
         }
       };
     });
   }
 
   send(type, data = {}) {
-    if (!this.connected) return;
-    this.conn.send(JSON.stringify({ type, data }));
+    if (!this.connected) {
+      console.warn('WebSocket 未连接，无法发送:', type);
+      return;
+    }
+    const payload = JSON.stringify({ type, data });
+    console.log('发送:', payload);
+    this.conn.send(payload);
   }
 
   on(type, fn) {

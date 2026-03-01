@@ -23,30 +23,41 @@ function showMsg(elemId, text, isError = true) {
 
 // 初始化
 async function init() {
+  try {
+    bindEvents();
+    bindWSHandlers();
+    console.log('事件绑定完成');
+  } catch (e) {
+    console.error('绑定事件失败:', e);
+  }
   const host = location.host || 'localhost:9100';
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   try {
     await ws.connect(`${proto}://${host}/ws`);
+    showMsg('auth-msg', '已连接服务器', false);
   } catch (e) {
-    showMsg('auth-msg', '无法连接服务器');
-    return;
+    showMsg('auth-msg', '无法连接服务器，请确认后端已启动');
   }
-  bindEvents();
-  bindWSHandlers();
 }
 
 function bindEvents() {
   // 登录/注册
   document.getElementById('btn-login').addEventListener('click', () => {
+    console.log('登录按钮被点击');
     const u = document.getElementById('auth-user').value.trim();
     const p = document.getElementById('auth-pass').value;
+    if (!ws.connected) { showMsg('auth-msg', '未连接服务器，请刷新页面'); return; }
     if (!u || !p) { showMsg('auth-msg', '请输入用户名和密码'); return; }
+    console.log('发送登录请求:', u);
     ws.send('login', { username: u, password: p });
   });
   document.getElementById('btn-register').addEventListener('click', () => {
+    console.log('注册按钮被点击');
     const u = document.getElementById('auth-user').value.trim();
     const p = document.getElementById('auth-pass').value;
+    if (!ws.connected) { showMsg('auth-msg', '未连接服务器，请刷新页面'); return; }
     if (!u || !p) { showMsg('auth-msg', '请输入用户名和密码'); return; }
+    console.log('发送注册请求:', u);
     ws.send('register', { username: u, password: p });
   });
   // 回车登录

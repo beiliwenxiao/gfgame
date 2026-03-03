@@ -380,6 +380,23 @@ export class BaseGameScene extends PrologueScene {
   }
 
   /**
+   * 加载火焰图片
+   */
+  loadFireImage() {
+    if (!this.campfire) return;
+    this.campfire.fireImage = new Image();
+    this.campfire.fireImage.onload = () => {
+      this.campfire.imageLoaded = true;
+      console.log('BaseGameScene: 火焰图片加载成功');
+    };
+    this.campfire.fireImage.onerror = () => {
+      console.warn('BaseGameScene: 火焰图片加载失败');
+      this.campfire.imageLoaded = false;
+    };
+    this.campfire.fireImage.src = 'images/fire.webp';
+  }
+
+  /**
    * 初始化 UI 面板
    */
   initializeUIPanels() {

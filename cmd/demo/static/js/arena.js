@@ -32,17 +32,14 @@ class ArenaRenderer {
 
     resize() {
         if (!this.canvas) return;
-        // 保持引擎逻辑尺寸 800x600，等比缩放适配容器（不拉伸）
-        this.canvas.width = 800;
-        this.canvas.height = 600;
+        // canvas 直接使用容器实际尺寸，不做 CSS 缩放
         const container = this.canvas.parentElement;
-        if (container && container.clientWidth > 0 && container.clientHeight > 0) {
-            const cw = container.clientWidth;
-            const ch = container.clientHeight;
-            const scale = Math.min(cw / 800, ch / 600);
-            this.canvas.style.width = Math.floor(800 * scale) + 'px';
-            this.canvas.style.height = Math.floor(600 * scale) + 'px';
-        }
+        const cw = (container && container.clientWidth > 0) ? container.clientWidth : window.innerWidth;
+        const ch = (container && container.clientHeight > 0) ? container.clientHeight : (window.innerHeight - 120);
+        this.canvas.width = cw;
+        this.canvas.height = ch;
+        this.canvas.style.width = cw + 'px';
+        this.canvas.style.height = ch + 'px';
     }
 
     async start(state) {

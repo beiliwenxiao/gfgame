@@ -5,6 +5,7 @@
  */
 import { BaseGameScene } from '../../prologue/scenes/BaseGameScene.js';
 import { EntityFactory } from '../../ecs/EntityFactory.js';
+import { NameComponent } from '../../ecs/components/NameComponent.js';
 
 export class ArenaScene extends BaseGameScene {
     constructor() {
@@ -14,11 +15,26 @@ export class ArenaScene extends BaseGameScene {
         // 竞技场状态
         this.selfId = 0;
         this.remotePlayers = new Map(); // charId -> entity
-        this.campfire = { x: 400, y: 300 };
         this.arenaSize = { width: 800, height: 600 };
         this.skills = [];
         this.skillCooldowns = {};
         this.selectedTarget = null;
+        
+        // 火堆（场景正中，默认点燃）
+        this.campfire = {
+            x: 400, y: 300,
+            lit: true,
+            fireImage: null,
+            imageLoaded: false,
+            frameWidth: 658 / 4,
+            frameHeight: 712 / 3,
+            frameCols: 4,
+            frameRows: 3,
+            frameCount: 12,
+            currentFrame: 0,
+            frameTime: 0,
+            frameDuration: 0.16
+        };
         
         // 网络同步
         this.lastMoveTime = 0;
@@ -63,9 +79,28 @@ export class ArenaScene extends BaseGameScene {
             document.getElementById = origGetElement;
         }
         
+        // 用实际 canvas 尺寸覆盖逻辑尺寸，避免双重压缩
+        const canvas = document.getElementById(this.canvasId);
+        if (canvas) {
+            this.logicalWidth = canvas.width;
+            this.logicalHeight = canvas.height;
+            if (this.isometricRenderer) {
+                this.isometricRenderer.canvasWidth = canvas.width;
+                this.isometricRenderer.canvasHeight = canvas.height;
+            }
+            if (this.camera) {
+                this.camera.width = canvas.width;
+                this.camera.height = canvas.height;
+            }
+        }
+        
         if (data) {
             this.selfId = data.self_id;
-            this.campfire = data.campfire || { x: 400, y: 300 };
+            // 只更新火堆坐标，保留动画参数
+            if (data.campfire) {
+                this.campfire.x = data.campfire.x || 400;
+                this.campfire.y = data.campfire.y || 300;
+            }
             this.arenaSize = data.arena || { width: 800, height: 600 };
             this.skills = data.skills || [];
             
@@ -82,6 +117,12 @@ export class ArenaScene extends BaseGameScene {
         }
         
         console.log('ArenaScene: 进入竞技场', this.selfId);
+        
+        // 加载火焰图片
+        this.loadFireImage();
+        
+        // 竞技场火堆默认点燃，创建粒子效果
+        this.initCampfireParticles();
     }
 
     /**
@@ -96,7 +137,14 @@ export class ArenaScene extends BaseGameScene {
      */
     createPlayerEntity() {
         super.createPlayerEntity();
-        // 玩家实体由 BaseGameScene 创建，后续通过 updateSelfFromServer 更新属性
+        // 给玩家添加名字组件（BaseGameScene 默认不添加）
+        if (this.playerEntity && !this.playerEntity.getComponent('name')) {
+            this.playerEntity.addComponent(new NameComponent('玩家', {
+                color: '#4CAF50',
+                fontSize: 14,
+                offsetY: -10
+            }));
+        }
     }
 
     /**
@@ -126,6 +174,12 @@ export class ArenaScene extends BaseGameScene {
         const nameComp = this.playerEntity.getComponent('name');
         if (nameComp) {
             nameComp.name = serverData.name;
+        } else {
+            this.playerEntity.addComponent(new NameComponent(serverData.name, {
+                color: '#4CAF50',
+                fontSize: 14,
+                offsetY: -10
+            }));
         }
     }
 
@@ -162,6 +216,13 @@ export class ArenaScene extends BaseGameScene {
         entity.dead = serverData.dead || false;
         entity.targetX = serverData.x;
         entity.targetY = serverData.y;
+        
+        // 添加名字组件
+        entity.addComponent(new NameComponent(serverData.name, {
+            color: '#ffffff',
+            fontSize: 14,
+            offsetY: -10
+        }));
         
         this.entities.push(entity);
         this.remotePlayers.set(serverData.char_id, entity);
@@ -206,6 +267,9 @@ export class ArenaScene extends BaseGameScene {
             ind.dashOffset += 60 * deltaTime;
             return ind.life > 0;
         });
+        
+        // 更新火堆动画
+        this.updateCampfireAnimation(deltaTime);
         
         // 调用父类 update
         super.update(deltaTime);
@@ -408,6 +472,209 @@ export class ArenaScene extends BaseGameScene {
                     '#ffab40'
                 );
             }
+        }
+    }
+
+    /**
+     * 初始化火堆粒子效果（竞技场火堆默认点燃）
+     */
+    initCampfireParticles() {
+        if (!this.campfire || !this.campfire.lit || !this.particleSystem) return;
+        
+        const fireBaseY = this.campfire.y - 15;
+        const firePoint = { x: this.campfire.x, y: fireBaseY };
+        
+        this.campfire.emitters = [];
+        
+        // 大火焰粒子
+        this.campfire.emitters.push(this.particleSystem.createEmitter({
+            position: { x: firePoint.x, y: firePoint.y },
+            rate: 6, duration: Infinity,
+            particleConfig: {
+                position: { x: firePoint.x, y: firePoint.y },
+                velocity: { x: 0, y: -50 }, life: 250, size: 8.5,
+                color: '#ffaa22', alpha: 0.85, gravity: 0, friction: 0.95
+            }
+        }));
+        
+        // 中火焰粒子
+        this.campfire.emitters.push(this.particleSystem.createEmitter({
+            position: { x: firePoint.x, y: firePoint.y },
+            rate: 8, duration: Infinity,
+            particleConfig: {
+                position: { x: firePoint.x, y: firePoint.y },
+                velocity: { x: 0, y: -35 }, life: 200, size: 6,
+                color: '#ff8833', alpha: 0.8, gravity: 0, friction: 0.95
+            }
+        }));
+        
+        // 白色亮点
+        this.campfire.emitters.push(this.particleSystem.createEmitter({
+            position: { x: firePoint.x, y: firePoint.y },
+            rate: 4, duration: Infinity,
+            particleConfig: {
+                position: { x: firePoint.x, y: firePoint.y },
+                velocity: { x: 0, y: -120 }, life: 400, size: 4.5,
+                color: '#ffffee', alpha: 1.0, gravity: 0, friction: 0.95
+            }
+        }));
+        
+        // 亮黄色火星
+        this.campfire.emitters.push(this.particleSystem.createEmitter({
+            position: { x: firePoint.x, y: firePoint.y },
+            rate: 10, duration: Infinity,
+            particleConfig: {
+                position: { x: firePoint.x, y: firePoint.y },
+                velocity: { x: 0, y: -100 }, life: 350, size: 3.5,
+                color: '#ffee44', alpha: 0.9, gravity: 0, friction: 0.95
+            }
+        }));
+        
+        // 橙色火星
+        this.campfire.emitters.push(this.particleSystem.createEmitter({
+            position: { x: firePoint.x, y: firePoint.y },
+            rate: 8, duration: Infinity,
+            particleConfig: {
+                position: { x: firePoint.x, y: firePoint.y },
+                velocity: { x: 0, y: -80 }, life: 300, size: 2.5,
+                color: '#ff9933', alpha: 0.85, gravity: 0, friction: 0.95
+            }
+        }));
+        
+        // 红色火星
+        this.campfire.emitters.push(this.particleSystem.createEmitter({
+            position: { x: firePoint.x, y: firePoint.y },
+            rate: 6, duration: Infinity,
+            particleConfig: {
+                position: { x: firePoint.x, y: firePoint.y },
+                velocity: { x: 0, y: -60 }, life: 250, size: 2,
+                color: '#ff5522', alpha: 0.8, gravity: 0, friction: 0.95
+            }
+        }));
+        
+        // 小火星
+        this.campfire.emitters.push(this.particleSystem.createEmitter({
+            position: { x: firePoint.x, y: firePoint.y },
+            rate: 12, duration: Infinity,
+            particleConfig: {
+                position: { x: firePoint.x, y: firePoint.y },
+                velocity: { x: 0, y: -40 }, life: 200, size: 2,
+                color: '#ff6633', alpha: 0.7, gravity: 0, friction: 0.95
+            }
+        }));
+        
+        console.log('ArenaScene: 火堆粒子效果已创建');
+    }
+
+    /**
+     * 更新火堆动画
+     */
+    updateCampfireAnimation(deltaTime) {
+        if (!this.campfire || !this.campfire.lit || !this.campfire.imageLoaded) return;
+        this.campfire.frameTime += deltaTime;
+        if (this.campfire.frameTime >= this.campfire.frameDuration) {
+            this.campfire.frameTime = 0;
+            this.campfire.currentFrame = (this.campfire.currentFrame + 1) % this.campfire.frameCount;
+        }
+        
+        // 更新火焰粒子摇摆
+        if (this.campfire.emitters) {
+            const time = performance.now() / 1000;
+            this.campfire.emitters.forEach((emitter, index) => {
+                if (emitter) {
+                    const swayAmount = Math.sin(time * (2 + index * 0.5)) * (3 + index);
+                    const baseX = this.campfire.x;
+                    const baseY = this.campfire.y - 15;
+                    emitter.position.x = baseX + swayAmount;
+                    emitter.position.y = baseY;
+                }
+            });
+        }
+    }
+
+    /**
+     * 覆盖 renderWorldObjects - 添加火堆渲染
+     */
+    renderWorldObjects(ctx) {
+        const renderQueue = [];
+
+        for (const entity of this.entities) {
+            const transform = entity.getComponent('transform');
+            if (transform) {
+                renderQueue.push({ type: 'entity', y: transform.position.y, entity });
+            }
+        }
+
+        // 添加火堆
+        if (this.campfire) {
+            renderQueue.push({
+                type: 'campfire',
+                y: this.campfire.y,
+                render: () => this.renderCampfire(ctx)
+            });
+        }
+
+        renderQueue.sort((a, b) => a.y - b.y);
+
+        for (const item of renderQueue) {
+            if (item.type === 'entity') {
+                this.renderEntity(ctx, item.entity);
+            } else if (item.render) {
+                item.render();
+            }
+        }
+    }
+
+    /**
+     * 渲染火堆
+     */
+    renderCampfire(ctx) {
+        const x = this.campfire.x;
+        const y = this.campfire.y;
+
+        // 燃烧的木材底座
+        ctx.save();
+        ctx.strokeStyle = '#3a2a1a';
+        ctx.lineWidth = 8;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x - 20, y - 5);
+        ctx.lineTo(x + 20, y - 25);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x + 20, y - 5);
+        ctx.lineTo(x - 20, y - 25);
+        ctx.stroke();
+        ctx.restore();
+
+        // 发光效果
+        const gradient = ctx.createRadialGradient(x, y - 15, 0, x, y - 15, 60);
+        gradient.addColorStop(0, 'rgba(255, 200, 0, 0.4)');
+        gradient.addColorStop(0.5, 'rgba(255, 100, 0, 0.2)');
+        gradient.addColorStop(1, 'rgba(255, 50, 0, 0)');
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(x, y - 15, 60, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 火焰帧动画
+        if (this.campfire.imageLoaded && this.campfire.fireImage) {
+            const col = this.campfire.currentFrame % this.campfire.frameCols;
+            const row = Math.floor(this.campfire.currentFrame / this.campfire.frameCols);
+            const frameX = col * this.campfire.frameWidth;
+            const frameY = row * this.campfire.frameHeight;
+            const fireWidth = 40;
+            const fireHeight = 60;
+            const fireX = x - fireWidth / 2;
+            const fireY = y - fireHeight - 5;
+
+            ctx.globalAlpha = 0.9;
+            ctx.drawImage(
+                this.campfire.fireImage,
+                frameX, frameY, this.campfire.frameWidth, this.campfire.frameHeight,
+                fireX, fireY, fireWidth, fireHeight
+            );
+            ctx.globalAlpha = 1.0;
         }
     }
 

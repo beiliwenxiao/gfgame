@@ -158,22 +158,6 @@ export class Act1SceneECS extends BaseGameScene {
   }
 
   /**
-   * 加载火焰图片
-   */
-  loadFireImage() {
-    this.campfire.fireImage = new Image();
-    this.campfire.fireImage.onload = () => {
-      this.campfire.imageLoaded = true;
-      console.log('Act1SceneECS: 火焰图片加载成功');
-    };
-    this.campfire.fireImage.onerror = () => {
-      console.warn('Act1SceneECS: 火焰图片加载失败');
-      this.campfire.imageLoaded = false;
-    };
-    this.campfire.fireImage.src = 'images/fire.webp';
-  }
-
-  /**
    * 显示角色创建界面
    */
   showCharacterCreation() {

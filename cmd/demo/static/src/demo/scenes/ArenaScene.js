@@ -256,13 +256,28 @@ export class ArenaScene extends BaseGameScene {
         // 发送移动到服务端
         this.sendMovement();
         
-        // 插值远程玩家位置
+        // 插值远程玩家位置 + 同步行走动画
         for (const [id, entity] of this.remotePlayers) {
+            if (entity.dead) continue;
             if (entity.targetX !== undefined) {
                 const transform = entity.getComponent('transform');
                 if (transform) {
-                    transform.position.x += (entity.targetX - transform.position.x) * 0.3;
-                    transform.position.y += (entity.targetY - transform.position.y) * 0.3;
+                    const dx = entity.targetX - transform.position.x;
+                    const dy = entity.targetY - transform.position.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    transform.position.x += dx * 0.3;
+                    transform.position.y += dy * 0.3;
+                    
+                    // 根据距离判断是否在移动，切换行走/待机动画
+                    const sprite = entity.getComponent('sprite');
+                    if (sprite) {
+                        if (dist > 2) {
+                            sprite.isWalking = true;
+                        } else {
+                            sprite.isWalking = false;
+                        }
+                    }
                 }
             }
         }
@@ -301,11 +316,9 @@ export class ArenaScene extends BaseGameScene {
                          this.inputManager.isKeyDown('arrowleft') || this.inputManager.isKeyDown('arrowright');
         
         if (hasInput) {
-            let direction = 'down';
-            if (this.inputManager.isKeyDown('w') || this.inputManager.isKeyDown('arrowup')) direction = 'up';
-            if (this.inputManager.isKeyDown('s') || this.inputManager.isKeyDown('arrowdown')) direction = 'down';
-            if (this.inputManager.isKeyDown('a') || this.inputManager.isKeyDown('arrowleft')) direction = 'left';
-            if (this.inputManager.isKeyDown('d') || this.inputManager.isKeyDown('arrowright')) direction = 'right';
+            // 使用精灵组件的当前方向（由 MovementSystem 计算的8方向）
+            const sprite = this.playerEntity.getComponent('sprite');
+            const direction = (sprite && sprite.direction) ? sprite.direction : 'down';
             
             this.ws.send('move', {
                 x: transform.position.x,
@@ -386,12 +399,22 @@ export class ArenaScene extends BaseGameScene {
     }
 
     onPlayerMoved(data) {
-        const entity = this.remotePlayers.get(data.char_id);
-        if (entity) {
+            const entity = this.remotePlayers.get(data.char_id);
+            if (!entity) return;
+
             entity.targetX = data.x;
             entity.targetY = data.y;
+
+            // 同步方向到精灵组件
+            if (data.direction) {
+                const sprite = entity.getComponent('sprite');
+                if (sprite) {
+                    sprite.direction = data.direction;
+                    sprite.isWalking = true;
+                }
+            }
         }
-    }
+
 
     onDamage(data) {
         // 更新目标 HP
@@ -429,9 +452,20 @@ export class ArenaScene extends BaseGameScene {
             entity.dead = true;
             const stats = entity.getComponent('stats');
             if (stats) stats.hp = 0;
+            // 死亡时精灵半透明
+            const sprite = entity.getComponent('sprite');
+            if (sprite) {
+                sprite.alpha = 0.3;
+                sprite.isWalking = false;
+            }
         }
+        // 在死亡实体位置显示击杀信息
+        const deadEntity = entity || (data.char_id === this.selfId ? this.playerEntity : null);
+        const transform = deadEntity ? deadEntity.getComponent('transform') : null;
+        const textX = transform ? transform.position.x : 400;
+        const textY = transform ? transform.position.y - 40 : 300;
         if (this.floatingTextManager) {
-            this.floatingTextManager.addText(400, 300, `${data.name} 被 ${data.killer} 击杀`, '#ff0000');
+            this.floatingTextManager.addText(textX, textY, `${data.name} 被 ${data.killer} 击杀`, '#ff0000');
         }
     }
 
@@ -456,6 +490,11 @@ export class ArenaScene extends BaseGameScene {
                 stats.maxHp = data.max_hp;
                 stats.mp = data.mp;
                 stats.maxMp = data.max_mp;
+            }
+            // 复活时恢复精灵透明度
+            const sprite = entity.getComponent('sprite');
+            if (sprite) {
+                sprite.alpha = 1.0;
             }
         }
         if (this.floatingTextManager) {
@@ -712,8 +751,8 @@ export class ArenaScene extends BaseGameScene {
     setupBottomControlBar() {
         if (!this.bottomControlBar) return;
         
-        // 扩大槽位尺寸：40 -> 64
-        const slotSize = 64;
+        // 槽位尺寸 60px
+        const slotSize = 60;
         const slotGap = 8;
         const totalSlots = 7;
         const totalWidth = totalSlots * slotSize + (totalSlots - 1) * slotGap;
@@ -726,9 +765,9 @@ export class ArenaScene extends BaseGameScene {
         this.bottomControlBar.x = (this.logicalWidth - barWidth) / 2;
         this.bottomControlBar.y = this.logicalHeight - barHeight;
         
-        // 更新血蓝球位置
-        this.bottomControlBar.hpOrb.x = 60;
-        this.bottomControlBar.mpOrb.x = barWidth - 60;
+        // 红蓝球各向外移 20px
+        this.bottomControlBar.hpOrb.x = 40;
+        this.bottomControlBar.mpOrb.x = barWidth - 40;
         
         // 重新计算槽位位置
         const startX = barWidth / 2 - totalWidth / 2 + slotSize / 2;

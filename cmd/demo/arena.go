@@ -121,8 +121,8 @@ func (s *DemoServer) handleMove(session *PlayerSession, data json.RawMessage) {
 	if err := json.Unmarshal(data, &req); err != nil {
 		return
 	}
-	session.x = math.Max(10, math.Min(ArenaWidth-10, req.X))
-	session.y = math.Max(10, math.Min(ArenaHeight-10, req.Y))
+	session.x = math.Max(-ArenaWidth+10, math.Min(ArenaWidth-10, req.X))
+	session.y = math.Max(-ArenaHeight+10, math.Min(ArenaHeight-10, req.Y))
 	if req.Direction != "" {
 		session.direction = req.Direction
 	}

@@ -25,10 +25,15 @@ function showMsg(elemId, text, isError = true) {
 async function init() {
   try {
     bindEvents();
-    bindWSHandlers();
     console.log('事件绑定完成');
   } catch (e) {
     console.error('绑定事件失败:', e);
+  }
+  try {
+    bindWSHandlers();
+    console.log('WS处理器绑定完成');
+  } catch (e) {
+    console.error('绑定WS处理器失败:', e);
   }
   const host = location.host || 'localhost:9100';
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -147,14 +152,18 @@ function bindWSHandlers() {
   });
 
   // 竞技场事件
-  ws.on('arena_state', (data) => {
-    showPage('page-arena');
-    arena.init('arena-canvas');
-    arena.start(data);
-    const self = arena.players.get(arena.selfId);
-    if (self) {
-      document.getElementById('hud-name').textContent = self.name;
-      arena.updateHUD(self);
+  ws.on('arena_state', async (data) => {
+    try {
+      showPage('page-arena');
+      arena.init('engineCanvas');
+      await arena.start(data);
+      const self = arena.players.get(arena.selfId);
+      if (self) {
+        document.getElementById('hud-name').textContent = self.name;
+        arena.updateHUD(self);
+      }
+    } catch (e) {
+      console.error('进入竞技场失败:', e);
     }
   });
 

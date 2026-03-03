@@ -1,0 +1,150 @@
+/**
+ * Particle - 粒子类
+ * 表示单个粒子的属性和行为
+ */
+export class Particle {
+  /**
+   * @param {Object} config - 粒子配置
+   * @param {Object} config.position - 初始位置 {x, y}
+   * @param {Object} config.velocity - 初始速度 {x, y}
+   * @param {number} config.life - 生命周期（毫秒）
+   * @param {number} config.size - 粒子大小
+   * @param {string} config.color - 粒子颜色
+   * @param {number} [config.alpha=1] - 初始透明度
+   * @param {number} [config.gravity=0] - 重力加速度
+   * @param {number} [config.friction=1] - 摩擦系数
+   */
+  constructor(config) {
+    this.position = { ...config.position };
+    this.velocity = { ...config.velocity };
+    this.life = config.life;
+    this.maxLife = config.life;
+    this.size = config.size;
+    this.color = config.color;
+    this.alpha = config.alpha !== undefined ? config.alpha : 1;
+    this.initialAlpha = this.alpha;
+    this.gravity = config.gravity || 0;
+    this.friction = config.friction !== undefined ? config.friction : 1;
+    this.active = true;
+  }
+
+  /**
+   * 更新粒子状态
+   * @param {number} deltaTime - 时间增量（秒）
+   */
+  update(deltaTime) {
+    if (!this.active) return;
+
+    // 更新生命周期
+    this.life -= deltaTime * 1000;
+    if (this.life <= 0) {
+      this.active = false;
+      return;
+    }
+
+    // 应用重力
+    this.velocity.y += this.gravity * deltaTime;
+
+    // 应用摩擦
+    this.velocity.x *= this.friction;
+    this.velocity.y *= this.friction;
+
+    // 火焰粒子特殊效果：随着上升，水平摆动增加（形成火舌）
+    if (this.color.startsWith('#ff')) {
+      const lifeRatio = this.life / this.maxLife;
+      const ageRatio = 1 - lifeRatio; // 0到1，0是刚生成，1是快消失
+      
+      // 随着粒子上升，增加水平摆动（形成顶部的尖锐火舌）
+      const swingMultiplier = ageRatio * 3; // 上升过程中摆动增加3倍
+      const time = performance.now() / 1000;
+      const swing = Math.sin(time * 8 + this.position.x * 0.1) * 15 * swingMultiplier;
+      
+      this.velocity.x += swing * deltaTime;
+    }
+
+    // 更新位置
+    this.position.x += this.velocity.x * deltaTime;
+    this.position.y += this.velocity.y * deltaTime;
+
+    // 更新透明度（使用非线性衰减，让火焰更清晰）
+    const lifeRatio = this.life / this.maxLife;
+    
+    // 火焰效果：前80%生命周期保持明亮，最后20%快速消失
+    if (lifeRatio > 0.2) {
+      this.alpha = this.initialAlpha;
+    } else {
+      // 最后20%生命周期快速衰减
+      const fadeRatio = lifeRatio / 0.2;
+      this.alpha = this.initialAlpha * fadeRatio;
+    }
+  }
+
+  /**
+   * 渲染粒子
+   * @param {CanvasRenderingContext2D} ctx - Canvas 渲染上下文
+   * @param {Object} camera - 相机对象（用于视锥剔除，但不用于坐标转换）
+   */
+  render(ctx, camera) {
+    if (!this.active) return;
+
+    // 直接使用世界坐标，因为相机变换已经在ctx中应用了
+    const screenX = this.position.x;
+    const screenY = this.position.y;
+    
+    // 确保所有值都是有效的数字
+    if (!isFinite(screenX) || !isFinite(screenY)) {
+      return;
+    }
+
+    ctx.save();
+    ctx.globalAlpha = this.alpha;
+    
+    // 确保 size 是有效的正数
+    const safeSize = Math.max(0.1, this.size || 1);
+    
+    // 为火焰粒子添加发光效果
+    if (this.color && this.color.startsWith('#ff')) {
+      // 外层发光
+      const glowGradient = ctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, safeSize * 1.5);
+      glowGradient.addColorStop(0, this.color);
+      glowGradient.addColorStop(0.5, this.color + '80'); // 50%透明
+      glowGradient.addColorStop(1, this.color + '00'); // 完全透明
+      ctx.fillStyle = glowGradient;
+      ctx.beginPath();
+      ctx.arc(screenX, screenY, safeSize * 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // 核心
+      ctx.fillStyle = this.color;
+      ctx.beginPath();
+      ctx.arc(screenX, screenY, safeSize * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // 非火焰粒子（如烟雾、瞬移特效）使用普通渲染
+      ctx.fillStyle = this.color || '#ffffff';
+      ctx.beginPath();
+      ctx.arc(screenX, screenY, safeSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    
+    ctx.restore();
+  }
+
+  /**
+   * 重置粒子（用于对象池）
+   * @param {Object} config - 新的粒子配置
+   */
+  reset(config) {
+    this.position = { ...config.position };
+    this.velocity = { ...config.velocity };
+    this.life = config.life;
+    this.maxLife = config.life;
+    this.size = config.size;
+    this.color = config.color;
+    this.alpha = config.alpha !== undefined ? config.alpha : 1;
+    this.initialAlpha = this.alpha;
+    this.gravity = config.gravity || 0;
+    this.friction = config.friction !== undefined ? config.friction : 1;
+    this.active = true;
+  }
+}

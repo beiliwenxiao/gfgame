@@ -6,13 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/gogf/gf/v2/os/glog"
 )
 
 // Monitor 提供性能指标记录和告警功能。
@@ -35,24 +34,31 @@ type Metrics struct {
 	NetworkBytesOut int64         `json:"network_bytes_out"`
 }
 
-// Logger 封装 GoFrame glog，提供模块级结构化日志。
+// LogLevel 日志级别
+type LogLevel int
+
+const (
+	LevelDebug LogLevel = iota
+	LevelInfo
+	LevelWarn
+	LevelError
+)
+
+// Logger 封装标准库 log，提供模块级结构化日志。
 type Logger struct {
 	module string
-	logger *glog.Logger
+	level  LogLevel
 }
 
-// NewLogger 创建一个以 GoFrame glog 为后端的模块级日志记录器。
+// NewLogger 创建一个模块级日志记录器。
 func NewLogger(module string) *Logger {
-	l := glog.New()
-	l.SetFlags(glog.F_TIME_DATE | glog.F_TIME_TIME | glog.F_TIME_MILLI)
-	return &Logger{module: module, logger: l}
+	return &Logger{module: module, level: LevelDebug}
 }
 
 // goroutineID 返回当前 goroutine 的 ID（尽力而为，仅用于日志）。
 func goroutineID() uint64 {
 	var buf [64]byte
 	n := runtime.Stack(buf[:], false)
-	// 格式："goroutine 123 [..."
 	var id uint64
 	for i := len("goroutine "); i < n; i++ {
 		if buf[i] < '0' || buf[i] > '9' {
@@ -69,37 +75,44 @@ func (l *Logger) prefix() string {
 }
 
 // Debug 以 DEBUG 级别记录日志。
-func (l *Logger) Debug(ctx context.Context, msg string, args ...interface{}) {
-	l.logger.Debugf(ctx, "%s %s", l.prefix(), fmt.Sprintf(msg, args...))
+func (l *Logger) Debug(_ context.Context, msg string, args ...interface{}) {
+	if l.level <= LevelDebug {
+		log.Printf("DEBUG %s %s", l.prefix(), fmt.Sprintf(msg, args...))
+	}
 }
 
 // Info 以 INFO 级别记录日志。
-func (l *Logger) Info(ctx context.Context, msg string, args ...interface{}) {
-	l.logger.Infof(ctx, "%s %s", l.prefix(), fmt.Sprintf(msg, args...))
+func (l *Logger) Info(_ context.Context, msg string, args ...interface{}) {
+	if l.level <= LevelInfo {
+		log.Printf("INFO  %s %s", l.prefix(), fmt.Sprintf(msg, args...))
+	}
 }
 
 // Warn 以 WARN 级别记录日志。
-func (l *Logger) Warn(ctx context.Context, msg string, args ...interface{}) {
-	l.logger.Warningf(ctx, "%s %s", l.prefix(), fmt.Sprintf(msg, args...))
+func (l *Logger) Warn(_ context.Context, msg string, args ...interface{}) {
+	if l.level <= LevelWarn {
+		log.Printf("WARN  %s %s", l.prefix(), fmt.Sprintf(msg, args...))
+	}
 }
 
-// Error 以 ERROR 级别记录日志，并在配置了 Webhook 时触发告警。
-func (l *Logger) Error(ctx context.Context, msg string, args ...interface{}) {
-	formatted := fmt.Sprintf(msg, args...)
-	l.logger.Errorf(ctx, "%s %s", l.prefix(), formatted)
+// Error 以 ERROR 级别记录日志。
+func (l *Logger) Error(_ context.Context, msg string, args ...interface{}) {
+	if l.level <= LevelError {
+		log.Printf("ERROR %s %s", l.prefix(), fmt.Sprintf(msg, args...))
+	}
 }
 
 // SetLevel 设置日志级别。可接受的值："DEBUG"、"INFO"、"WARN"、"ERROR"。
 func (l *Logger) SetLevel(level string) {
 	switch level {
 	case "DEBUG":
-		l.logger.SetLevel(glog.LEVEL_ALL)
+		l.level = LevelDebug
 	case "INFO":
-		l.logger.SetLevel(glog.LEVEL_INFO | glog.LEVEL_WARN | glog.LEVEL_ERRO)
+		l.level = LevelInfo
 	case "WARN":
-		l.logger.SetLevel(glog.LEVEL_WARN | glog.LEVEL_ERRO)
+		l.level = LevelWarn
 	case "ERROR":
-		l.logger.SetLevel(glog.LEVEL_ERRO)
+		l.level = LevelError
 	}
 }
 
@@ -109,17 +122,11 @@ func (l *Logger) SetLevel(level string) {
 
 // Config 保存监控配置。
 type Config struct {
-	// TickRate 是预期的每秒 tick 次数（用于告警阈值计算）。
-	TickRate int
-	// AlertThresholdPct 当 tick 耗时超过帧间隔该百分比，且连续超过
-	// AlertConsecutiveFrames 帧时触发告警。
-	AlertThresholdPct float64
-	// AlertConsecutiveFrames 是触发告警所需的连续慢帧数。
+	TickRate               int
+	AlertThresholdPct      float64
 	AlertConsecutiveFrames int
-	// WebhookURL 是 ERROR 级别 Webhook 告警的目标 URL，为空则禁用。
-	WebhookURL string
-	// HTTPAddr 是指标 HTTP 端点的监听地址，为空则禁用。
-	HTTPAddr string
+	WebhookURL             string
+	HTTPAddr               string
 }
 
 // DefaultConfig 返回带有合理默认值的 Config。
@@ -143,38 +150,27 @@ type gameMonitor struct {
 	networkBytesIn  int64
 	networkBytesOut int64
 
-	// tick 耗时追踪（环形缓冲区，用于计算平均值）。
 	tickDurations []time.Duration
 	tickIdx       int
 	tickCount     int
 
-	// 性能告警追踪。
 	consecutiveSlow int
 
-	// Webhook HTTP 客户端。
 	webhookClient *http.Client
-
-	// 指标端点 HTTP 服务器。
-	httpServer *http.Server
-
-	// alertCallback 在性能告警触发时调用（用于测试）。
+	httpServer    *http.Server
 	alertCallback func(msg string)
-
-	// webhookSent 记录已发送的 Webhook 次数（原子操作，用于测试）。
-	webhookSent atomic.Int64
+	webhookSent   atomic.Int64
 }
 
-// NewMonitor 创建并返回新的 Monitor。调用 StartHTTP() 以启动指标端点。
+// NewMonitor 创建并返回新的 Monitor。
 func NewMonitor(cfg Config) *gameMonitor {
-	m := &gameMonitor{
+	return &gameMonitor{
 		cfg:           cfg,
-		tickDurations: make([]time.Duration, 100), // 100 个 tick 的滚动窗口
+		tickDurations: make([]time.Duration, 100),
 		webhookClient: &http.Client{Timeout: 5 * time.Second},
 	}
-	return m
 }
 
-// RecordTickDuration 记录单次 tick 的耗时。
 func (m *gameMonitor) RecordTickDuration(d time.Duration) {
 	m.mu.Lock()
 	m.tickDurations[m.tickIdx] = d
@@ -185,14 +181,12 @@ func (m *gameMonitor) RecordTickDuration(d time.Duration) {
 	m.mu.Unlock()
 }
 
-// RecordActiveEntities 更新活跃实体数量。
 func (m *gameMonitor) RecordActiveEntities(count int) {
 	m.mu.Lock()
 	m.activeEntities = count
 	m.mu.Unlock()
 }
 
-// RecordNetworkThroughput 累加网络字节计数器。
 func (m *gameMonitor) RecordNetworkThroughput(bytesIn, bytesOut int64) {
 	m.mu.Lock()
 	m.networkBytesIn += bytesIn
@@ -200,21 +194,18 @@ func (m *gameMonitor) RecordNetworkThroughput(bytesIn, bytesOut int64) {
 	m.mu.Unlock()
 }
 
-// SetOnlineClients 更新在线客户端数量。
 func (m *gameMonitor) SetOnlineClients(n int) {
 	m.mu.Lock()
 	m.onlineClients = n
 	m.mu.Unlock()
 }
 
-// SetRoomCount 更新房间数量。
 func (m *gameMonitor) SetRoomCount(n int) {
 	m.mu.Lock()
 	m.roomCount = n
 	m.mu.Unlock()
 }
 
-// GetMetrics 返回当前运行时指标的快照。
 func (m *gameMonitor) GetMetrics() *Metrics {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -233,7 +224,6 @@ func (m *gameMonitor) GetMetrics() *Metrics {
 	}
 }
 
-// avgTickDuration 从滚动窗口计算平均 tick 耗时。调用方须持有至少读锁。
 func (m *gameMonitor) avgTickDuration() time.Duration {
 	if m.tickCount == 0 {
 		return 0
@@ -246,8 +236,6 @@ func (m *gameMonitor) avgTickDuration() time.Duration {
 	return total / time.Duration(count)
 }
 
-// CheckPerformanceAlert 检查最近的 tick 耗时是否超过配置阈值，
-// 连续慢帧达到阈值后触发告警。
 func (m *gameMonitor) CheckPerformanceAlert(tick uint64) {
 	if m.cfg.TickRate <= 0 {
 		return
@@ -256,7 +244,6 @@ func (m *gameMonitor) CheckPerformanceAlert(tick uint64) {
 	threshold := time.Duration(float64(frameInterval) * m.cfg.AlertThresholdPct)
 
 	m.mu.Lock()
-	// 查看最近一次记录的 tick 耗时。
 	lastIdx := m.tickIdx - 1
 	if lastIdx < 0 {
 		lastIdx = len(m.tickDurations) - 1
@@ -277,14 +264,12 @@ func (m *gameMonitor) CheckPerformanceAlert(tick uint64) {
 		if m.alertCallback != nil {
 			m.alertCallback(msg)
 		}
-		// 重置计数器，避免重复告警。
 		m.mu.Lock()
 		m.consecutiveSlow = 0
 		m.mu.Unlock()
 	}
 }
 
-// OnAlert 设置性能告警触发时的回调函数。
 func (m *gameMonitor) OnAlert(fn func(msg string)) {
 	m.alertCallback = fn
 }
@@ -293,8 +278,6 @@ func (m *gameMonitor) OnAlert(fn func(msg string)) {
 // HTTP 指标端点
 // ---------------------------------------------------------------------------
 
-// StartHTTP 启动 HTTP 服务器，将 /metrics 以 JSON 格式暴露。
-// 立即返回，服务器在后台 goroutine 中运行。
 func (m *gameMonitor) StartHTTP() error {
 	if m.cfg.HTTPAddr == "" {
 		return nil
@@ -313,7 +296,6 @@ func (m *gameMonitor) StartHTTP() error {
 	return nil
 }
 
-// StopHTTP 优雅关闭 HTTP 服务器。
 func (m *gameMonitor) StopHTTP(ctx context.Context) error {
 	if m.httpServer == nil {
 		return nil
@@ -321,7 +303,6 @@ func (m *gameMonitor) StopHTTP(ctx context.Context) error {
 	return m.httpServer.Shutdown(ctx)
 }
 
-// handleMetrics 将当前指标以 JSON 格式写入响应。
 func (m *gameMonitor) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	metrics := m.GetMetrics()
 	w.Header().Set("Content-Type", "application/json")
@@ -332,7 +313,6 @@ func (m *gameMonitor) handleMetrics(w http.ResponseWriter, r *http.Request) {
 // Webhook 告警
 // ---------------------------------------------------------------------------
 
-// WebhookPayload 是发送到 Webhook URL 的 JSON 请求体。
 type WebhookPayload struct {
 	Level   string `json:"level"`
 	Module  string `json:"module"`
@@ -340,8 +320,6 @@ type WebhookPayload struct {
 	Time    string `json:"time"`
 }
 
-// SendWebhookAlert 向配置的 Webhook URL 发送 ERROR 级别告警。
-// 未配置 Webhook 时为空操作。
 func (m *gameMonitor) SendWebhookAlert(module, message string) {
 	if m.cfg.WebhookURL == "" {
 		return
@@ -364,7 +342,6 @@ func (m *gameMonitor) SendWebhookAlert(module, message string) {
 	m.webhookSent.Add(1)
 }
 
-// WebhookSentCount 返回已发送的 Webhook 告警次数（用于测试）。
 func (m *gameMonitor) WebhookSentCount() int64 {
 	return m.webhookSent.Load()
 }

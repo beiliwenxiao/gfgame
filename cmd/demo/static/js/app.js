@@ -136,7 +136,7 @@ function bindWSHandlers() {
   ws.on('class_selected', (data) => {
     APP.character = data.character;
     APP.skills = data.skills || [];
-    APP.equipments = [];
+    APP.equipments = data.equipments || [];
     enterLobby();
   });
 

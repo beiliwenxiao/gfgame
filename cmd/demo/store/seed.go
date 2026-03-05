@@ -8,12 +8,12 @@ func (s *Store) SeedDefaultEquipment() error {
 	var count int
 	s.db.QueryRow("SELECT COUNT(*) FROM equipment_defs").Scan(&count)
 	if count > 0 {
-		// 检查是否有新字段（attack_range），如果旧数据没有则需要更新
-		var hasNewFields int
-		s.db.QueryRow("SELECT COUNT(*) FROM equipment_defs WHERE attack_range > 0").Scan(&hasNewFields)
-		if hasNewFields == 0 {
-			// 旧数据，删除重建
-			log.Println("检测到旧装备数据，重新初始化...")
+		// 检查是否有 icon_id 字段数据
+		var hasIconID int
+		s.db.QueryRow("SELECT COUNT(*) FROM equipment_defs WHERE icon_id != '' AND icon_id IS NOT NULL").Scan(&hasIconID)
+		if hasIconID == 0 {
+			// 旧数据没有 icon_id，删除重建
+			log.Println("检测到旧装备数据（缺少icon_id），重新初始化...")
 			s.db.Exec("DELETE FROM equipment_defs")
 			s.db.Exec("DELETE FROM skill_defs")
 			s.db.Exec("DELETE FROM char_equipments")
@@ -26,34 +26,34 @@ func (s *Store) SeedDefaultEquipment() error {
 
 	equipments := []EquipmentDef{
 		// 战士武器（近战，攻击范围90，攻击距离100）
-		{Name: "铁剑", SlotType: "weapon", Class: "warrior", Quality: "normal", Level: 1, Attack: 8,
+		{Name: "铁剑", IconID: "iron_sword", SlotType: "weapon", Class: "warrior", Quality: "normal", Level: 1, Attack: 8,
 			AttackInterval: 1.0, AttackRange: 90, AttackDistance: 100},
-		{Name: "钢剑", SlotType: "weapon", Class: "warrior", Quality: "rare", Level: 1, Attack: 15, CritRate: 0.03,
+		{Name: "钢剑", IconID: "steel_sword", SlotType: "weapon", Class: "warrior", Quality: "rare", Level: 1, Attack: 15, CritRate: 0.03,
 			AttackInterval: 0.9, AttackRange: 90, AttackDistance: 100},
-		{Name: "烈焰大剑", SlotType: "weapon", Class: "warrior", Quality: "epic", Level: 1, Attack: 25, CritRate: 0.05,
+		{Name: "烈焰大剑", IconID: "flame_sword", SlotType: "weapon", Class: "warrior", Quality: "epic", Level: 1, Attack: 25, CritRate: 0.05,
 			AttackInterval: 0.8, AttackRange: 100, AttackDistance: 110},
 		// 弓箭手武器（远程，攻击范围200，攻击距离250，有穿透和多重箭属性）
-		{Name: "短弓", SlotType: "weapon", Class: "archer", Quality: "normal", Level: 1, Attack: 6, Speed: 10,
+		{Name: "短弓", IconID: "short_bow", SlotType: "weapon", Class: "archer", Quality: "normal", Level: 1, Attack: 6, Speed: 10,
 			Pierce: 1, MultiArrow: 1, AttackInterval: 1.5, AttackRange: 200, AttackDistance: 250},
-		{Name: "长弓", SlotType: "weapon", Class: "archer", Quality: "rare", Level: 1, Attack: 12, Speed: 15, CritRate: 0.05,
+		{Name: "长弓", IconID: "long_bow", SlotType: "weapon", Class: "archer", Quality: "rare", Level: 1, Attack: 12, Speed: 15, CritRate: 0.05,
 			Pierce: 2, MultiArrow: 2, AttackInterval: 1.3, AttackRange: 220, AttackDistance: 270},
-		{Name: "暗影之弓", SlotType: "weapon", Class: "archer", Quality: "epic", Level: 1, Attack: 20, Speed: 20, CritRate: 0.1,
+		{Name: "暗影之弓", IconID: "shadow_bow", SlotType: "weapon", Class: "archer", Quality: "epic", Level: 1, Attack: 20, Speed: 20, CritRate: 0.1,
 			Pierce: 3, MultiArrow: 3, AttackInterval: 1.5, AttackRange: 250, AttackDistance: 300},
 		// 通用防具
-		{Name: "皮甲", SlotType: "armor", Class: "all", Quality: "normal", Level: 1, Defense: 5, HP: 20},
-		{Name: "锁子甲", SlotType: "armor", Class: "all", Quality: "rare", Level: 1, Defense: 12, HP: 50},
-		{Name: "皮靴", SlotType: "boots", Class: "all", Quality: "normal", Level: 1, Defense: 2, Speed: 15},
-		{Name: "疾风靴", SlotType: "boots", Class: "all", Quality: "rare", Level: 1, Defense: 4, Speed: 30},
-		{Name: "铁盔", SlotType: "helmet", Class: "all", Quality: "normal", Level: 1, Defense: 3, HP: 15},
-		{Name: "精钢盔", SlotType: "helmet", Class: "all", Quality: "rare", Level: 1, Defense: 7, HP: 35},
+		{Name: "皮甲", IconID: "leather_armor", SlotType: "armor", Class: "all", Quality: "normal", Level: 1, Defense: 5, HP: 20},
+		{Name: "锁子甲", IconID: "chain_mail", SlotType: "armor", Class: "all", Quality: "rare", Level: 1, Defense: 12, HP: 50},
+		{Name: "皮靴", IconID: "leather_boots", SlotType: "boots", Class: "all", Quality: "normal", Level: 1, Defense: 2, Speed: 15},
+		{Name: "疾风靴", IconID: "swift_boots", SlotType: "boots", Class: "all", Quality: "rare", Level: 1, Defense: 4, Speed: 30},
+		{Name: "铁盔", IconID: "iron_helmet", SlotType: "helmet", Class: "all", Quality: "normal", Level: 1, Defense: 3, HP: 15},
+		{Name: "精钢盔", IconID: "steel_helmet", SlotType: "helmet", Class: "all", Quality: "rare", Level: 1, Defense: 7, HP: 35},
 	}
 
 	for _, eq := range equipments {
 		_, err := s.db.Exec(
-			`INSERT INTO equipment_defs (name,slot_type,class,quality,level,attack,defense,hp,speed,crit_rate,
+			`INSERT INTO equipment_defs (name,icon_id,slot_type,class,quality,level,attack,defense,hp,speed,crit_rate,
 			 pierce,multi_arrow,attack_interval,attack_range,attack_distance)
-			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			eq.Name, eq.SlotType, eq.Class, eq.Quality, eq.Level,
+			 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			eq.Name, eq.IconID, eq.SlotType, eq.Class, eq.Quality, eq.Level,
 			eq.Attack, eq.Defense, eq.HP, eq.Speed, eq.CritRate,
 			eq.Pierce, eq.MultiArrow, eq.AttackInterval, eq.AttackRange, eq.AttackDistance,
 		)
@@ -88,5 +88,40 @@ func (s *Store) SeedDefaultEquipment() error {
 		}
 	}
 
+	return nil
+}
+
+// GrantInitialEquipments 给新角色发放初始装备（普通品质一套）
+func (s *Store) GrantInitialEquipments(charID int64, class string) error {
+	// 查找该职业可用的普通品质装备（每个槽位取第一个）
+	rows, err := s.db.Query(
+		`SELECT id, slot_type FROM equipment_defs
+		 WHERE (class=? OR class='all') AND quality='normal'
+		 ORDER BY slot_type, id`,
+		class,
+	)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	equipped := map[string]bool{}
+	for rows.Next() {
+		var defID int64
+		var slotType string
+		if err := rows.Scan(&defID, &slotType); err != nil {
+			continue
+		}
+		// 每个槽位只装备一件
+		if equipped[slotType] {
+			continue
+		}
+		equipped[slotType] = true
+		s.db.Exec(
+			"INSERT INTO char_equipments (character_id, equip_def_id, slot_type) VALUES (?,?,?)",
+			charID, defID, slotType,
+		)
+	}
+	log.Printf("角色 %d 发放初始装备: %v", charID, equipped)
 	return nil
 }

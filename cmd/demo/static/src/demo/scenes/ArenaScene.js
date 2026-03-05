@@ -1369,7 +1369,7 @@ export class ArenaScene extends BaseGameScene {
             
             // 构建前端装备对象
             const item = {
-                id: def.id,
+                id: def.icon_id || def.id,
                 name: def.name,
                 type: eq.slot_type,
                 subType: frontendSlot,

@@ -53,6 +53,43 @@ export class ItemIconRenderer {
     if (id === 'coin_sword') {
       return ItemIconRenderer._drawScaled(ctx, cx, cy, scale, ItemIconRenderer.drawCoinSword);
     }
+    // 后端装备图标
+    if (id === 'iron_sword') {
+      return ItemIconRenderer._drawScaled(ctx, cx, cy, scale, ItemIconRenderer.drawIronSword);
+    }
+    if (id === 'steel_sword') {
+      return ItemIconRenderer._drawScaled(ctx, cx, cy, scale, ItemIconRenderer.drawSteelSword);
+    }
+    if (id === 'flame_sword') {
+      return ItemIconRenderer._drawScaled(ctx, cx, cy, scale, ItemIconRenderer.drawFlameSword);
+    }
+    if (id === 'short_bow') {
+      return ItemIconRenderer._drawScaled(ctx, cx, cy, scale, ItemIconRenderer.drawShortBow);
+    }
+    if (id === 'long_bow') {
+      return ItemIconRenderer._drawScaled(ctx, cx, cy, scale, ItemIconRenderer.drawLongBow);
+    }
+    if (id === 'shadow_bow') {
+      return ItemIconRenderer._drawScaled(ctx, cx, cy, scale, ItemIconRenderer.drawShadowBow);
+    }
+    if (id === 'leather_armor') {
+      return ItemIconRenderer._drawScaled(ctx, cx, cy, scale, ItemIconRenderer.drawLeatherArmor);
+    }
+    if (id === 'chain_mail') {
+      return ItemIconRenderer._drawScaled(ctx, cx, cy, scale, ItemIconRenderer.drawChainMail);
+    }
+    if (id === 'leather_boots') {
+      return ItemIconRenderer._drawScaled(ctx, cx, cy, scale, ItemIconRenderer.drawLeatherBoots);
+    }
+    if (id === 'swift_boots') {
+      return ItemIconRenderer._drawScaled(ctx, cx, cy, scale, ItemIconRenderer.drawSwiftBoots);
+    }
+    if (id === 'iron_helmet') {
+      return ItemIconRenderer._drawScaled(ctx, cx, cy, scale, ItemIconRenderer.drawIronHelmet);
+    }
+    if (id === 'steel_helmet') {
+      return ItemIconRenderer._drawScaled(ctx, cx, cy, scale, ItemIconRenderer.drawSteelHelmet);
+    }
     if (id.includes('health_potion') || (item.type === 'consumable' && effectType === 'heal')) {
       return ItemIconRenderer._drawScaled(ctx, cx, cy, scale, (c) => ItemIconRenderer.drawPotion(c, '#ff3333', '#ff6666', '#cc0000'));
     }
@@ -709,5 +746,197 @@ export class ItemIconRenderer {
     drawCoin(0, 13.5, 2.8);
   }
 
+  /** 铁剑图标 */
+  static drawIronSword(ctx) {
+    ctx.fillStyle = '#b0b0b0';
+    ctx.beginPath();
+    ctx.moveTo(0, -14); ctx.lineTo(3, -10); ctx.lineTo(3, 2);
+    ctx.lineTo(-3, 2); ctx.lineTo(-3, -10); ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#707070'; ctx.lineWidth = 0.5; ctx.stroke();
+    ctx.fillStyle = '#d0d0d0';
+    ctx.beginPath();
+    ctx.moveTo(0, -13); ctx.lineTo(1.5, -10); ctx.lineTo(1.5, 1); ctx.lineTo(0, 1); ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#8B6914'; ctx.fillRect(-6, 2, 12, 2.5);
+    ctx.fillStyle = '#5a3a0a'; ctx.fillRect(-1.5, 4.5, 3, 8);
+    ctx.fillStyle = '#8B6914';
+    ctx.beginPath(); ctx.arc(0, 13, 2, 0, Math.PI * 2); ctx.fill();
+  }
+
+  /** 钢剑图标 */
+  static drawSteelSword(ctx) {
+    ctx.fillStyle = '#c8d8e8';
+    ctx.beginPath();
+    ctx.moveTo(0, -14); ctx.lineTo(3.5, -10); ctx.lineTo(3.5, 2);
+    ctx.lineTo(-3.5, 2); ctx.lineTo(-3.5, -10); ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#6688aa'; ctx.lineWidth = 0.8; ctx.stroke();
+    ctx.fillStyle = '#e8f0ff';
+    ctx.beginPath();
+    ctx.moveTo(0, -13); ctx.lineTo(1.5, -10); ctx.lineTo(1.5, 1); ctx.lineTo(-0.5, 1); ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#FFD700'; ctx.fillRect(-7, 2, 14, 3);
+    ctx.fillStyle = '#4a2a0a'; ctx.fillRect(-2, 5, 4, 7);
+    ctx.fillStyle = '#0088ff';
+    ctx.beginPath(); ctx.arc(0, 3.5, 1.5, 0, Math.PI * 2); ctx.fill();
+  }
+
+  /** 烈焰大剑图标 */
+  static drawFlameSword(ctx) {
+    ctx.fillStyle = '#cc4444';
+    ctx.beginPath();
+    ctx.moveTo(0, -15); ctx.lineTo(4, -10); ctx.lineTo(4, 2);
+    ctx.lineTo(-4, 2); ctx.lineTo(-4, -10); ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#882222'; ctx.lineWidth = 0.8; ctx.stroke();
+    ctx.fillStyle = '#ff8800'; ctx.globalAlpha = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(-2, -12); ctx.quadraticCurveTo(-4, -8, -1, -5);
+    ctx.quadraticCurveTo(1, -8, 2, -12); ctx.closePath();
+    ctx.fill(); ctx.globalAlpha = 1.0;
+    ctx.fillStyle = '#FFD700'; ctx.fillRect(-7, 2, 14, 3);
+    ctx.fillStyle = '#3a1a0a'; ctx.fillRect(-2, 5, 4, 7);
+    ctx.fillStyle = '#ff4400';
+    ctx.beginPath(); ctx.arc(0, 3.5, 2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffaa00';
+    ctx.beginPath(); ctx.arc(0, 3.5, 1, 0, Math.PI * 2); ctx.fill();
+  }
+
+  /** 短弓图标 */
+  static drawShortBow(ctx) {
+    ctx.strokeStyle = '#8B6914'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(4, 0, 12, Math.PI * 0.7, Math.PI * 1.3); ctx.stroke();
+    ctx.strokeStyle = '#c8b88a'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(4 + 12 * Math.cos(Math.PI * 0.7), 12 * Math.sin(Math.PI * 0.7));
+    ctx.lineTo(4 + 12 * Math.cos(Math.PI * 1.3), 12 * Math.sin(Math.PI * 1.3));
+    ctx.stroke();
+    ctx.strokeStyle = '#5a3a0a'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(4, 0, 12, Math.PI * 0.95, Math.PI * 1.05); ctx.stroke();
+  }
+
+  /** 长弓图标 */
+  static drawLongBow(ctx) {
+    ctx.strokeStyle = '#6b5a10'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(4, 0, 14, Math.PI * 0.6, Math.PI * 1.4); ctx.stroke();
+    ctx.strokeStyle = '#4a9eff'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(4 + 14 * Math.cos(Math.PI * 0.6), 14 * Math.sin(Math.PI * 0.6));
+    ctx.lineTo(4 + 14 * Math.cos(Math.PI * 1.4), 14 * Math.sin(Math.PI * 1.4));
+    ctx.stroke();
+    ctx.strokeStyle = '#0066cc'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(4, 0, 14, Math.PI * 0.95, Math.PI * 1.05); ctx.stroke();
+  }
+
+  /** 暗影之弓图标 */
+  static drawShadowBow(ctx) {
+    ctx.strokeStyle = '#6a2c91'; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(4, 0, 14, Math.PI * 0.6, Math.PI * 1.4); ctx.stroke();
+    ctx.strokeStyle = '#aa44ff'; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.4;
+    ctx.beginPath(); ctx.arc(4, 0, 16, Math.PI * 0.65, Math.PI * 1.35); ctx.stroke();
+    ctx.globalAlpha = 1.0;
+    ctx.strokeStyle = '#cc66ff'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(4 + 14 * Math.cos(Math.PI * 0.6), 14 * Math.sin(Math.PI * 0.6));
+    ctx.lineTo(4 + 14 * Math.cos(Math.PI * 1.4), 14 * Math.sin(Math.PI * 1.4));
+    ctx.stroke();
+    ctx.strokeStyle = '#4a0a6a'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(4, 0, 14, Math.PI * 0.95, Math.PI * 1.05); ctx.stroke();
+  }
+
+  /** 皮甲图标 */
+  static drawLeatherArmor(ctx) {
+    ctx.fillStyle = '#8B6914';
+    ctx.beginPath();
+    ctx.moveTo(0, -13); ctx.lineTo(-7, -10); ctx.lineTo(-13, -4); ctx.lineTo(-11, -1);
+    ctx.lineTo(-8, -5); ctx.lineTo(-9, 12); ctx.lineTo(9, 12); ctx.lineTo(8, -5);
+    ctx.lineTo(11, -1); ctx.lineTo(13, -4); ctx.lineTo(7, -10); ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#5a4a0a'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = '#6b5210';
+    ctx.beginPath(); ctx.ellipse(0, -12, 4, 2, 0, 0, Math.PI); ctx.fill();
+    ctx.fillStyle = '#5a3a0a'; ctx.fillRect(-9, 3, 18, 3);
+    ctx.fillStyle = '#c0a040'; ctx.fillRect(-2, 3, 4, 3);
+  }
+
+  /** 锁子甲图标 */
+  static drawChainMail(ctx) {
+    ctx.fillStyle = '#a0a0a0';
+    ctx.beginPath();
+    ctx.moveTo(0, -13); ctx.lineTo(-7, -10); ctx.lineTo(-13, -4); ctx.lineTo(-11, -1);
+    ctx.lineTo(-8, -5); ctx.lineTo(-9, 12); ctx.lineTo(9, 12); ctx.lineTo(8, -5);
+    ctx.lineTo(11, -1); ctx.lineTo(13, -4); ctx.lineTo(7, -10); ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#707070'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.strokeStyle = '#888888'; ctx.lineWidth = 0.4;
+    for (let row = -8; row < 10; row += 3) {
+      for (let col = -7; col < 8; col += 3) {
+        ctx.beginPath(); ctx.arc(col, row, 1.2, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+    ctx.fillStyle = '#808080';
+    ctx.beginPath(); ctx.ellipse(0, -12, 4, 2, 0, 0, Math.PI); ctx.fill();
+  }
+
+  /** 皮靴图标 */
+  static drawLeatherBoots(ctx) {
+    ctx.fillStyle = '#8B6914';
+    ctx.beginPath();
+    ctx.moveTo(-4, -10); ctx.lineTo(-4, 4); ctx.lineTo(-10, 6); ctx.lineTo(-10, 10);
+    ctx.lineTo(6, 10); ctx.lineTo(6, 4); ctx.lineTo(4, 4); ctx.lineTo(4, -10);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#5a4a0a'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = '#6b5210'; ctx.fillRect(-5, -10, 10, 3);
+    ctx.fillStyle = '#3a2a0a'; ctx.fillRect(-10, 9, 16, 2);
+  }
+
+  /** 疾风靴图标 */
+  static drawSwiftBoots(ctx) {
+    ctx.fillStyle = '#2a8a4a';
+    ctx.beginPath();
+    ctx.moveTo(-4, -10); ctx.lineTo(-4, 4); ctx.lineTo(-10, 6); ctx.lineTo(-10, 10);
+    ctx.lineTo(6, 10); ctx.lineTo(6, 4); ctx.lineTo(4, 4); ctx.lineTo(4, -10);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#1a6a3a'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.strokeStyle = '#88ffaa'; ctx.lineWidth = 0.8; ctx.globalAlpha = 0.6;
+    ctx.beginPath(); ctx.moveTo(7, 2); ctx.quadraticCurveTo(12, 0, 10, -3); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(7, 5); ctx.quadraticCurveTo(14, 3, 12, 0); ctx.stroke();
+    ctx.globalAlpha = 1.0;
+    ctx.fillStyle = '#1a6a3a'; ctx.fillRect(-5, -10, 10, 3);
+    ctx.fillStyle = '#0a3a1a'; ctx.fillRect(-10, 9, 16, 2);
+  }
+
+  /** 铁盔图标 */
+  static drawIronHelmet(ctx) {
+    ctx.fillStyle = '#a0a0a0';
+    ctx.beginPath(); ctx.arc(0, -2, 12, Math.PI, 0);
+    ctx.lineTo(12, 6); ctx.lineTo(-12, 6); ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#707070'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = '#888888'; ctx.fillRect(-1.5, -2, 3, 10);
+    ctx.fillStyle = '#c8c8c8'; ctx.globalAlpha = 0.5;
+    ctx.beginPath(); ctx.arc(-3, -5, 5, Math.PI * 1.2, Math.PI * 1.8);
+    ctx.lineTo(-3, -5); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1.0;
+    ctx.fillStyle = '#808080'; ctx.fillRect(-12, 5, 24, 2);
+  }
+
+  /** 精钢盔图标 */
+  static drawSteelHelmet(ctx) {
+    ctx.fillStyle = '#b0c0d0';
+    ctx.beginPath(); ctx.arc(0, -2, 12, Math.PI, 0);
+    ctx.lineTo(12, 6); ctx.lineTo(-12, 6); ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#6688aa'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = '#90a0b0'; ctx.fillRect(-1.5, -2, 3, 10);
+    ctx.fillStyle = '#FFD700';
+    ctx.beginPath(); ctx.moveTo(-3, -13); ctx.lineTo(0, -16); ctx.lineTo(3, -13); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#d8e8ff'; ctx.globalAlpha = 0.5;
+    ctx.beginPath(); ctx.arc(-3, -5, 5, Math.PI * 1.2, Math.PI * 1.8);
+    ctx.lineTo(-3, -5); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1.0;
+    ctx.fillStyle = '#c0a040'; ctx.fillRect(-12, 5, 24, 2);
+  }
 
 }

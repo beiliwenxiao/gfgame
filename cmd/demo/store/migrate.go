@@ -31,6 +31,7 @@ func (s *Store) AutoMigrate() error {
 		`CREATE TABLE IF NOT EXISTS equipment_defs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL,
+			icon_id TEXT DEFAULT '',
 			slot_type TEXT NOT NULL,
 			class TEXT DEFAULT 'all',
 			quality TEXT DEFAULT 'normal',
@@ -74,6 +75,7 @@ func (s *Store) AutoMigrate() error {
 
 	// 兼容旧数据库：尝试添加新字段（如果已存在则忽略错误）
 	alterStmts := []string{
+		"ALTER TABLE equipment_defs ADD COLUMN icon_id TEXT DEFAULT ''",
 		"ALTER TABLE equipment_defs ADD COLUMN pierce INTEGER DEFAULT 0",
 		"ALTER TABLE equipment_defs ADD COLUMN multi_arrow INTEGER DEFAULT 0",
 		"ALTER TABLE equipment_defs ADD COLUMN attack_interval REAL DEFAULT 0",

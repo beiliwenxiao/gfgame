@@ -33,6 +33,7 @@ type Character struct {
 type EquipmentDef struct {
 	ID            int64   `json:"id"`
 	Name          string  `json:"name"`
+	IconID        string  `json:"icon_id"`   // 前端图标标识
 	SlotType      string  `json:"slot_type"` // weapon, helmet, armor, boots
 	Class         string  `json:"class"`     // warrior, archer, all
 	Quality       string  `json:"quality"`   // normal, rare, epic

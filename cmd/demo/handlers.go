@@ -140,11 +140,16 @@ func (s *DemoServer) handleSelectClass(session *PlayerSession, data json.RawMess
 	session.charName = ch.Name
 	session.charClass = ch.Class
 
+	// 发放初始装备
+	s.db.GrantInitialEquipments(ch.ID, ch.Class)
+
 	skills, _ := s.db.GetSkillsByClass(ch.Class)
+	equips, _ := s.db.GetCharEquipments(ch.ID)
 
 	session.Send(ServerMessage{Type: MsgClassSelected, Data: map[string]interface{}{
-		"character": ch,
-		"skills":    skills,
+		"character":  ch,
+		"skills":     skills,
+		"equipments": equips,
 	}})
 }
 

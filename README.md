@@ -1,7 +1,7 @@
-# gfgame-MMRPG游戏后端引擎
+# gogame - MMRPG游戏后端引擎
 
 #### 介绍
-gfgame 是基于 GoFrame 框架构建的 MMRPG 游戏后端引擎。引擎采用 ECS（Entity-Component-System）架构，支持帧同步（Lockstep）与状态同步（State Sync）双模式，提供层次化地图系统、装备系统、战斗系统等核心模块。
+gogame 是轻量级 MMRPG 游戏后端引擎，采用纯 Go 标准库 + 少量精选第三方库构建。引擎采用 ECS（Entity-Component-System）架构，支持帧同步（Lockstep）与状态同步（State Sync）双模式，提供层次化地图系统、装备系统、战斗系统等核心模块。
 引擎是纯后端服务。前端（如 html5-mmrpg-game）通过 WebSocket/TCP 协议与引擎通信，完全解耦。
 
 #### 软件架构
@@ -33,9 +33,10 @@ gfgame/
 ```
 
 主要依赖：
-- [GoFrame v2](https://github.com/gogf/gf) — 基础框架
 - [gorilla/websocket](https://github.com/gorilla/websocket) — WebSocket 支持
 - [google/uuid](https://github.com/google/uuid) — 实体 ID 生成
+- [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) — SQLite 数据库（纯 Go 实现，无 CGO）
+- [fsnotify](https://github.com/fsnotify/fsnotify) — 配置文件热重载
 
 #### 安装教程
 

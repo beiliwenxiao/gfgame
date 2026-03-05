@@ -25,30 +25,35 @@ export class BottomControlBar extends UIElement {
 
     this.entity = null;
     
-    // 血球配置
-    this.hpOrb = {
-      x: 60,
-      y: 50,
-      radius: 35,
-      color: '#ff0000',
-      glowColor: '#ff6666'
-    };
-    
-    // 蓝球配置
-    this.mpOrb = {
-      x: this.width - 60,
-      y: 50,
-      radius: 35,
-      color: '#0066ff',
-      glowColor: '#6699ff'
-    };
-    
     // 技能槽配置（5个技能 + 2个药水快捷槽）
     const slotSize = 40;
     const slotGap = 6;
     const totalSlots = 7;
     const totalWidth = totalSlots * slotSize + (totalSlots - 1) * slotGap;
     const startX = this.width / 2 - totalWidth / 2 + slotSize / 2;
+    
+    // 血球配置（紧贴技能槽左侧）
+    const orbRadius = 35;
+    const orbGap = 10; // 球与技能槽的间距
+    const slotsLeftEdge = this.width / 2 - totalWidth / 2;
+    const slotsRightEdge = this.width / 2 + totalWidth / 2;
+    
+    this.hpOrb = {
+      x: slotsLeftEdge - orbGap - orbRadius,
+      y: 50,
+      radius: orbRadius,
+      color: '#ff0000',
+      glowColor: '#ff6666'
+    };
+    
+    // 蓝球配置（紧贴技能槽右侧）
+    this.mpOrb = {
+      x: slotsRightEdge + orbGap + orbRadius,
+      y: 50,
+      radius: orbRadius,
+      color: '#0066ff',
+      glowColor: '#6699ff'
+    };
     
     this.skillSlots = [];
     for (let i = 0; i < totalSlots; i++) {

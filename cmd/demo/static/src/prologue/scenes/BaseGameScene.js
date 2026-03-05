@@ -406,10 +406,10 @@ export class BaseGameScene extends PrologueScene {
    * 初始化 UI 面板
    */
   initializeUIPanels() {
-    // 角色信息面板（包含装备）
+    // 角色信息面板（包含装备）- 左下角，底部控制栏上方
     this.playerInfoPanel = new PlayerInfoPanel({
       x: 10,
-      y: 10,
+      y: this.logicalHeight - 100 - 580,
       width: 320,
       height: 580,
       visible: false,
@@ -438,10 +438,10 @@ export class BaseGameScene extends PrologueScene {
       }
     });
     
-    // 背包面板
+    // 背包面板 - 右下角，底部控制栏上方
     this.inventoryPanel = new InventoryPanel({
-      x: 420,
-      y: 10,
+      x: this.logicalWidth - 370 - 10,
+      y: this.logicalHeight - 100 - 350,
       width: 370,
       height: 350,
       visible: false,
@@ -678,7 +678,6 @@ export class BaseGameScene extends PrologueScene {
       this.bottomControlBar.width = width;
       this.bottomControlBar.x = 0;
       this.bottomControlBar.y = height - this.bottomControlBar.height;
-      this.bottomControlBar.mpOrb.x = width - 60;
       
       // 重新计算槽位居中
       const slotSize = this.bottomControlBar.skillSlots[0]?.size || 40;
@@ -689,6 +688,26 @@ export class BaseGameScene extends PrologueScene {
       for (let i = 0; i < totalSlots; i++) {
         this.bottomControlBar.skillSlots[i].x = startX + i * (slotSize + slotGap);
       }
+      
+      // 重新计算红蓝球位置（紧贴技能槽两侧）
+      const orbRadius = this.bottomControlBar.hpOrb.radius;
+      const orbGap = 10;
+      const slotsLeftEdge = width / 2 - totalWidth / 2;
+      const slotsRightEdge = width / 2 + totalWidth / 2;
+      this.bottomControlBar.hpOrb.x = slotsLeftEdge - orbGap - orbRadius;
+      this.bottomControlBar.mpOrb.x = slotsRightEdge + orbGap + orbRadius;
+    }
+    
+    // 更新角色信息面板位置（左下角，底部控制栏上方）
+    if (this.playerInfoPanel) {
+      this.playerInfoPanel.x = 10;
+      this.playerInfoPanel.y = height - 100 - this.playerInfoPanel.height;
+    }
+    
+    // 更新背包面板位置（右下角，底部控制栏上方）
+    if (this.inventoryPanel) {
+      this.inventoryPanel.x = width - this.inventoryPanel.width - 10;
+      this.inventoryPanel.y = height - 100 - this.inventoryPanel.height;
     }
   }
 

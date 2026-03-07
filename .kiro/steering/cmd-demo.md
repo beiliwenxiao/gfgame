@@ -280,9 +280,61 @@ NPC AI 3 个位置（arena.go npcAITick）：
 - 只检查攻击者/施法者位置，不双向检查目标位置（安全区内无 NPC，区内玩家无法被选中）
 - 后端是权威拦截，前端是预判提示（浮动文字 `'安全区内禁止xxx'`）
 
+### `super.update()` 绕过安全区的陷阱
+
+`ArenaScene.update` 调用 `super.update()` 会触发 BaseGameScene 里的单机战斗系统（MeleeAttackSystem.performSectorAttack、MeleeAttackSystem.updateSectorSlashEffects、CombatSystem.handleSkillInput），这些系统有独立的攻击/技能逻辑，完全绕过 ArenaScene 的安全区检查。
+
+解决方案：ArenaScene.update 在 `super.update()` 前后设置/清除 `_safeZoneDisabled` 标志：
+1. `super.update()` 前：检测玩家是否在安全区，若是则在 MeleeAttackSystem 和 CombatSystem 上设 `_safeZoneDisabled = true`
+2. `super.update()` 后：清除标志
+3. 各系统内部检测标志，跳过攻击/技能逻辑
+
+与 `_arenaMode`（场景级持久开关）不同，`_safeZoneDisabled` 是每帧动态设/清，因为玩家会进出安全区。
+
 ### 继承链中的行为拦截模式
 - `handleTeleport` 和 `handleWeaponThrow` 定义在 `BaseGameScene` 中
 - ArenaScene 通过覆写 + `super.xxx()` 模式拦截，不修改 BaseGameScene 通用代码
 - 轻功触发：`Ctrl+鼠标左键`，由 `update()` 每帧调用 `handleTeleport()` 检测
 - 投掷触发：`Shift+鼠标左键`，由 `handleMouseClick()` 中 `shiftPressed` 分支调用
 - 两者都是纯前端行为（FlightSystem / WeaponRenderer），无后端消息，只需前端拦截
+
+
+## `_arenaMode` 标志：联网模式禁用单机逻辑
+
+- CombatSystem 的 `handlePlayerDeath` 内置 `setTimeout(5s, revivePlayer)` 自动复活，双标志有时序竞态风险
+- 在 CombatSystem 上设 `_arenaMode` 标志，`handlePlayerDeath` 检测到直接 return，从根源切断单机复活
+- ArenaScene `enter` 时 `this.combatSystem._arenaMode = true`，`exit` 时清除
+- 此模式可推广到其他需要联网/单机行为分离的系统（如 `_safeZoneDisabled` 同理）
+
+## 死亡清理完整清单
+
+玩家死亡（`onPlayerDied`）时需清理的所有状态：
+1. 双标志：`entity.dead = true` + `entity.isDead = true` + `entity.isDying = true`
+2. `stats.hp = 0`
+3. `selectedTarget = null`
+4. `meditationSystem.stop()`（打坐回血）
+5. 精灵透明度 `sprite.alpha = 0.3` + `sprite.isWalking = false`
+6. `_showSoulOverlay()`
+
+**注意**：`StatsComponent.heal()` 不检查死亡状态，任何回血来源都能让死人"诈尸"，必须从调用方层面阻断。
+
+## 安全区 2.5D 椭圆判定
+
+- 渲染用椭圆 `rx=radius, ry=radius/2`，碰撞判定必须同步用椭圆公式：`(dx/rx)² + (dy/ry)² <= 1`
+- 前端 `ArenaScene.isInSafeZone` 和后端 `arena.go isInSafeZone` 必须同时改，否则判定不一致
+- 不能用圆形 `distance <= radius` 代替椭圆判定
+
+## 鼠标按键分流
+
+### 左键攻击 / 右键移动的入口清单
+改鼠标按键分配时，需排查所有响应鼠标点击的入口：
+- `MovementSystem.handleClickMovement` — `button === 2`（右键移动）
+- `ArenaScene.handleEnemySelection` — `button === 0`（左键选中）
+- `CombatSystem.handleTargetSelection` — 已有 `button === 0`
+- `MeleeAttackSystem` — 用 `isMouseDown()` 不受 `isMouseClicked()` 影响
+- `MovementSystem.findEnemyAtPosition` — 只查 `type === 'enemy'`，ArenaScene 实体不匹配，右键点敌人位置仍正常移动
+
+### InputManager 鼠标按键机制
+- `handleMouseDown` 记录 `event.button`（0=左, 2=右）到 `this.mouse.button`
+- `isMouseClicked()` 不区分按键，需配合 `getMouseButton()` 过滤
+- Canvas 已有 `contextmenu` 的 `preventDefault()`，右键菜单不会弹出

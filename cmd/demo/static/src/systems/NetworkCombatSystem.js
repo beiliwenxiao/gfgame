@@ -341,15 +341,32 @@ export class NetworkCombatSystem {
             if (scene.floatingTextManager) {
                 scene.floatingTextManager.addText(selfTransform.position.x, selfTransform.position.y - 20, '安全区内禁止攻击', '#ffaa00');
             }
-            // 安全区内仍触发弯刀挥砍动画（只有视觉，不造成伤害）
-            if (scene.weaponRenderer) {
-                scene.weaponRenderer.startAttack('thrust');
-            }
             return;
         }
 
         const maxRange = this._getWeaponRange();
         const combat = scene.playerEntity.getComponent('combat');
+
+        // 武器冷却检查（与鼠标攻击共享同一冷却状态）
+        if (scene.meleeAttackSystem) {
+            const mas = scene.meleeAttackSystem;
+            const currentTime = performance.now() / 1000;
+            let weaponCooldown = mas.sliceGlobalCooldown;
+            const equipComp = scene.playerEntity.getComponent('equipment');
+            if (equipComp) {
+                const mainhand = equipComp.getEquipment('mainhand');
+                const offhand = equipComp.getEquipment('offhand');
+                if (mainhand && mainhand.attackSpeed != null) {
+                    weaponCooldown = mainhand.attackSpeed;
+                } else if (offhand && offhand.attackSpeed != null) {
+                    weaponCooldown = offhand.attackSpeed;
+                }
+            }
+            const timeSinceLastAttack = currentTime - mas.sliceLastAttackTime;
+            if (timeSinceLastAttack < weaponCooldown) {
+                return;
+            }
+        }
         let attacked = false;
         let firstTargetTransform = null;
 
@@ -379,7 +396,12 @@ export class NetworkCombatSystem {
             attacked = true;
         }
 
-        // 触发弯刀攻击动画
+        // 触发弯刀攻击动画 + 刀光/箭光特效
+        // 更新武器冷却时间（与鼠标攻击共享）
+        if (scene.meleeAttackSystem) {
+            scene.meleeAttackSystem.sliceLastAttackTime = performance.now() / 1000;
+            scene.meleeAttackSystem.sliceCooldownShown = false;
+        }
         if (scene.weaponRenderer) {
             if (attacked && firstTargetTransform) {
                 // 有命中目标：朝第一个目标方向
@@ -389,6 +411,30 @@ export class NetworkCombatSystem {
             }
             // 无论是否命中目标都触发弯刀特效（无目标时朝当前鼠标方向）
             scene.weaponRenderer.startAttack('thrust');
+        }
+
+        // 触发刀光/箭光特效（复用 MeleeAttackSystem 的扇形特效）
+        if (scene.meleeAttackSystem && scene.playerEntity) {
+            const sprite = scene.playerEntity.getComponent('sprite');
+            const spriteHeight = sprite?.height || 64;
+            const playerCenter = {
+                x: selfTransform.position.x,
+                y: selfTransform.position.y - spriteHeight / 2
+            };
+            // 攻击方向：有目标时朝目标，无目标时用当前鼠标方向
+            let dir = scene.meleeAttackSystem.sectorDirection;
+            if (attacked && firstTargetTransform) {
+                const dx = firstTargetTransform.position.x - selfTransform.position.x;
+                const dy = firstTargetTransform.position.y - selfTransform.position.y;
+                dir = Math.atan2(dy, dx);
+                scene.meleeAttackSystem.sectorDirection = dir;
+            }
+            const sectorRadius = scene.meleeAttackSystem.sliceAttackRange;
+            scene.meleeAttackSystem.spawnSectorSlashEffect(
+                playerCenter, dir,
+                playerCenter.x, playerCenter.y,
+                sectorRadius
+            );
         }
 
         if (!attacked) {

@@ -460,6 +460,29 @@ NPC AI 3 个位置（arena.go npcAITick）：
 - 正确模式：有目标时 `currentMouseAngle` 朝目标方向，无目标时保持当前鼠标方向（由 `BaseGameScene.update` → `updateMouseAngle` 每帧维护），然后无条件调用 `startAttack`
 - `startAttack()` 内部有 `if (this.attackAnimation.active) return` 防重入，不会叠加动画
 
+### 联网攻击的刀光/箭光特效
+- 联网攻击绕过 `MeleeAttackSystem`，刀光/箭光特效不会自动触发，需在 `attackAllInRange()` 里手动调用
+- 入口：`meleeAttackSystem.spawnSectorSlashEffect(playerCenter, dir, cx, cy, sectorRadius)`
+- `playerCenter` = `transform.position` 减去 `spriteHeight/2`（脚底坐标转身体中心）
+- `dir` 有目标时用 `Math.atan2(dy, dx)` 朝目标方向，并同步写入 `meleeAttackSystem.sectorDirection`；无目标时直接读 `sectorDirection`（每帧由 `MeleeAttackSystem.update` 跟随鼠标维护）
+- `sectorRadius` 读 `meleeAttackSystem.sliceAttackRange`
+- 安全区内不触发任何特效（弯刀和刀光都不触发）
+
+### 联网攻击与单机系统共享冷却状态
+
+武器冷却由 `MeleeAttackSystem` 管理，核心状态：
+- `sliceLastAttackTime` — 上次攻击时间（秒，`performance.now() / 1000`）
+- `sliceGlobalCooldown` — 默认冷却，实际值从装备读取（`mainhand.attackSpeed` 优先，其次 `offhand.attackSpeed`）
+- `sliceCooldownShown` — 冷却提示防重复标志
+
+`NetworkCombatSystem.attackAllInRange` 绕过了 `MeleeAttackSystem`，需手动复制同一套冷却逻辑：
+1. 攻击前：读 `mas.sliceLastAttackTime` + 装备 `attackSpeed` 计算剩余冷却，未就绪则显示"冷却中 Xs"并 return
+2. 攻击后：写回 `mas.sliceLastAttackTime = performance.now() / 1000` + 重置 `mas.sliceCooldownShown = false`
+
+两者操作同一个 `meleeAttackSystem` 实例，天然共享，无需额外同步。
+
+**通用原则**：联网攻击绕过单机系统时，凡是单机系统管理的"状态"（冷却、特效、动画），联网侧都需要手动读写。不只是"禁用单机逻辑"，有时还需要"复用单机状态"。
+
 ### 注意事项
 - `inputManager.markMouseClickHandled()` 必须在 `attackAllInRange()` 之前调用，防止 MovementSystem 同帧响应左键导致角色移动
 - 原有的 `attackTarget()` 仍保留用于单目标攻击场景（如技能指定目标）

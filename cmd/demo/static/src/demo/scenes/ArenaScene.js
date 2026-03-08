@@ -107,7 +107,13 @@ export class ArenaScene extends BaseGameScene {
         }
         
         // 联网模式：禁用 CombatSystem 的单机自动复活
-        if (this.combatSystem) this.combatSystem._arenaMode = true;
+        if (this.combatSystem) {
+            this.combatSystem._arenaMode = true;
+            // 键盘技能快捷键走联网路径
+            this.combatSystem.onNetworkSkillCast = (skillId) => {
+                this.castSkill(skillId);
+            };
+        }
         
         // 用实际 canvas 尺寸覆盖逻辑尺寸，避免双重压缩
         const canvas = document.getElementById(this.canvasId);
@@ -306,8 +312,12 @@ export class ArenaScene extends BaseGameScene {
      * 覆盖 update - 添加网络同步逻辑
      */
     update(deltaTime) {
-        // 发送移动到服务端
-        this.sendMovement();
+        // 昏迷状态检查（战吼效果）
+        const nowMs = Date.now();
+        const isStunned = this.playerEntity && this.playerEntity.stunUntil && nowMs < this.playerEntity.stunUntil;
+
+        // 发送移动到服务端（昏迷时不发送）
+        if (!isStunned) this.sendMovement();
         
         // 插值远程玩家位置 + 同步行走动画
         for (const [id, entity] of this.remotePlayers) {
@@ -421,8 +431,8 @@ export class ArenaScene extends BaseGameScene {
             return m.life > 0;
         });
         
-        // 空格键触发普攻（委托 NetworkCombatSystem）
-        this.networkCombat.handleSpaceAttack();
+        // 空格键触发普攻（委托 NetworkCombatSystem，昏迷时禁止）
+        if (!isStunned) this.networkCombat.handleSpaceAttack();
 
         // 更新火堆动画
         this.updateCampfireAnimation(deltaTime);
@@ -433,16 +443,19 @@ export class ArenaScene extends BaseGameScene {
             const t = this.playerEntity.getComponent('transform');
             if (t && this.isInSafeZone(t.position.x, t.position.y)) {
                 safeZoneDisabled = true;
-                if (this.meleeAttackSystem) this.meleeAttackSystem._safeZoneDisabled = true;
-                if (this.combatSystem) this.combatSystem._safeZoneDisabled = true;
             }
+        }
+        // 昏迷时同样禁用单机战斗系统
+        if (safeZoneDisabled || isStunned) {
+            if (this.meleeAttackSystem) this.meleeAttackSystem._safeZoneDisabled = true;
+            if (this.combatSystem) this.combatSystem._safeZoneDisabled = true;
         }
         
         // 调用父类 update
         super.update(deltaTime);
         
         // 恢复单机战斗系统
-        if (safeZoneDisabled) {
+        if (safeZoneDisabled || isStunned) {
             if (this.meleeAttackSystem) this.meleeAttackSystem._safeZoneDisabled = false;
             if (this.combatSystem) this.combatSystem._safeZoneDisabled = false;
         }
@@ -817,6 +830,7 @@ export class ArenaScene extends BaseGameScene {
     }
 
     onSkillCasted(data) {
+        console.log('[ArenaScene] onSkillCasted received:', data.skill_name, 'caster=', data.caster_id, 'area_type=', data.area_type);
         this.networkCombat.onSkillCasted(data);
     }
 
@@ -1141,6 +1155,107 @@ export class ArenaScene extends BaseGameScene {
                 item.render();
             }
         }
+
+        // 技能范围虚线（跟随玩家，始终在最上层）
+        this._renderSkillRangeIndicator(ctx);
+    }
+
+    /**
+     * 渲染技能范围虚线指示器（触发后显示，1秒淡出）
+     * 从 skillRangeIndicators 数组读取活跃的指示器
+     */
+    _renderSkillRangeIndicator(ctx) {
+            if (this.skillRangeIndicators.length === 0) return;
+
+            // 实时跟随玩家脚下位置
+            const foot = this._getFootCenter();
+            if (!foot) return;
+            // DEBUG: 确认每帧坐标是否变化
+            if (!this._lastFootLog || Date.now() - this._lastFootLog > 200) {
+                console.log('[SkillRange] foot=', foot.x.toFixed(1), foot.y.toFixed(1), 'indicators=', this.skillRangeIndicators.length);
+                this._lastFootLog = Date.now();
+            }
+
+            ctx.save();
+
+            for (const ind of this.skillRangeIndicators) {
+                // 淡出：最后 0.5 秒渐隐
+                const alpha = ind.life < 0.5 ? ind.life / 0.5 : 1;
+                ctx.globalAlpha = alpha * 0.8;
+                ctx.setLineDash([6, 4]);
+                ctx.lineDashOffset = ind.dashOffset || 0;
+                ctx.lineWidth = 1.5;
+
+                // 使用实时玩家脚下坐标
+                const cx = foot.x;
+                const cy = foot.y;
+
+                if (ind.areaType === 'fan') {
+                    const halfAngle = ind.halfAngle || Math.PI / 4;
+                    const steps = 32;
+                    ctx.strokeStyle = ind.color || 'rgba(255, 160, 50, 0.85)';
+                    ctx.fillStyle = ind.fillColor || 'rgba(255, 160, 50, 0.10)';
+                    ctx.beginPath();
+                    ctx.moveTo(cx, cy);
+                    for (let i = 0; i <= steps; i++) {
+                        const a = (ind.direction - halfAngle) + (i / steps) * halfAngle * 2;
+                        ctx.lineTo(cx + Math.cos(a) * ind.rx, cy + Math.sin(a) * ind.ry);
+                    }
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+
+                } else if (ind.areaType === 'ellipse') {
+                    ctx.strokeStyle = ind.color || 'rgba(100, 200, 255, 0.85)';
+                    ctx.fillStyle = ind.fillColor || 'rgba(100, 200, 255, 0.08)';
+                    ctx.beginPath();
+                    ctx.ellipse(cx, cy, ind.rx, ind.ry, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                }
+            }
+
+            ctx.setLineDash([]);
+            ctx.lineDashOffset = 0;
+            ctx.globalAlpha = 1;
+            ctx.restore();
+        }
+
+
+
+    /**
+     * 触发技能范围指示器显示
+     * @param {Object} opts - {areaType, x, y, rx, ry, direction?, halfAngle?, color?, fillColor?, duration?}
+     */
+    _showSkillRange(opts) {
+        this.skillRangeIndicators.push({
+            areaType: opts.areaType,
+            x: opts.x,
+            y: opts.y,
+            rx: opts.rx,
+            ry: opts.ry,
+            direction: opts.direction || 0,
+            halfAngle: opts.halfAngle || Math.PI / 4,
+            color: opts.color,
+            fillColor: opts.fillColor,
+            life: opts.duration || 1.0,
+            maxLife: opts.duration || 1.0
+        });
+    }
+
+    /**
+     * 获取玩家脚下圆心坐标（sprite 底部 1/10 位置）
+     */
+    _getFootCenter() {
+        if (!this.playerEntity) return null;
+        const transform = this.playerEntity.getComponent('transform');
+        if (!transform) return null;
+        const sprite = this.playerEntity.getComponent('sprite');
+        const h = sprite?.height || 64;
+        return {
+            x: transform.position.x,
+            y: transform.position.y - h / 10
+        };
     }
 
     /**
@@ -1840,7 +1955,10 @@ export class ArenaScene extends BaseGameScene {
         this.boneCorpses = [];
         this.moveTargetIndicators = [];
         this._hideSoulOverlay();
-        if (this.combatSystem) this.combatSystem._arenaMode = false;
+        if (this.combatSystem) {
+            this.combatSystem._arenaMode = false;
+            this.combatSystem.onNetworkSkillCast = null;
+        }
         super.exit();
     }
 }

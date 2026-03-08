@@ -27,6 +27,35 @@ func distance(x1, y1, x2, y2 float64) float64 {
 	return math.Sqrt(dx*dx + dy*dy)
 }
 
+// isInEllipseRange 2.5D 椭圆范围判定（rx = range, ry = range/2）
+func isInEllipseRange(cx, cy, tx, ty, radius float64) bool {
+	dx := tx - cx
+	dy := ty - cy
+	rx := radius
+	ry := radius / 2
+	return (dx*dx)/(rx*rx)+(dy*dy)/(ry*ry) <= 1
+}
+
+// isInFanRange 扇形范围判定（2.5D：Y 轴还原 ×2 后计算角度）
+// dir 为攻击方向角（弧度），halfAngle 为半角
+func isInFanRange(cx, cy, tx, ty, radius, dir, halfAngle float64) bool {
+	dx := tx - cx
+	dy := (ty - cy) * 2 // 还原 2.5D Y 轴压缩
+	dist := math.Sqrt(dx*dx + dy*dy)
+	if dist > radius {
+		return false
+	}
+	angle := math.Atan2(dy, dx)
+	diff := angle - dir
+	for diff > math.Pi {
+		diff -= math.Pi * 2
+	}
+	for diff < -math.Pi {
+		diff += math.Pi * 2
+	}
+	return math.Abs(diff) <= halfAngle
+}
+
 // isInSafeZone 判断坐标是否在篝火安全区内（2.5D 椭圆）
 func isInSafeZone(x, y float64) bool {
 	dx := x - CampfireX
@@ -259,15 +288,30 @@ func (s *DemoServer) handleCastSkill(session *PlayerSession, data json.RawMessag
 	}
 	session.mp -= skill.MPCost
 
-	// 旋风斩特殊处理：使用武器攻击范围
-	if skill.Name == "旋风斩" && session.weaponAttackRange > 0 {
-		skill.AreaSize = session.weaponAttackRange
+	// 猛击：扇形范围（与普攻一致），动态设置范围
+	if skill.Name == "猛击" {
+		skill.Range = session.weaponAttackDist
+		if skill.Range <= 0 {
+			skill.Range = 100.0
+		}
+	}
+	// 旋风斩：椭圆范围 = 武器距离
+	if skill.Name == "旋风斩" && session.weaponAttackDist > 0 {
+		skill.AreaSize = session.weaponAttackDist
+	}
+	// 战吼：椭圆范围 = 武器距离 × 3
+	if skill.Name == "战吼" {
+		skill.AreaSize = session.weaponAttackDist * 3
+		if skill.AreaSize <= 0 {
+			skill.AreaSize = 300.0
+		}
 	}
 
 	s.arena.BroadcastAll(ServerMessage{Type: MsgSkillCasted, Data: map[string]interface{}{
 		"caster_id": session.charID, "skill_id": skill.ID, "skill_name": skill.Name,
 		"target_x": req.TargetX, "target_y": req.TargetY,
 		"area_type": skill.AreaType, "area_size": skill.AreaSize,
+		"caster_x": session.x, "caster_y": session.y,
 		"caster_mp": session.mp, "caster_max_mp": session.maxMP,
 	}})
 	s.arena.mu.RLock()
@@ -280,10 +324,14 @@ func (s *DemoServer) handleCastSkill(session *PlayerSession, data json.RawMessag
 		switch skill.AreaType {
 		case "single":
 			hit = id == req.TargetID && distance(session.x, session.y, p.x, p.y) <= skill.Range
+		case "fan":
+			// 扇形：以施法者为中心，朝目标方向，半角 45°（π/4）
+			dir := math.Atan2((req.TargetY-session.y)*2, req.TargetX-session.x)
+			hit = isInFanRange(session.x, session.y, p.x, p.y, skill.Range, dir, math.Pi/4)
+		case "ellipse":
+			hit = isInEllipseRange(session.x, session.y, p.x, p.y, skill.AreaSize)
 		case "circle":
 			hit = distance(req.TargetX, req.TargetY, p.x, p.y) <= skill.AreaSize
-		case "fan":
-			hit = distance(session.x, session.y, p.x, p.y) <= skill.Range
 		}
 		if hit {
 			targets = append(targets, p)
@@ -291,11 +339,20 @@ func (s *DemoServer) handleCastSkill(session *PlayerSession, data json.RawMessag
 	}
 	s.arena.mu.RUnlock()
 	for _, t := range targets {
+		// 战吼：昏迷效果，不造成伤害
+		if skill.Name == "战吼" {
+			t.StunUntil = time.Now().UnixMilli() + 3000
+			s.arena.BroadcastAll(ServerMessage{Type: MsgSkillCasted, Data: map[string]interface{}{
+				"caster_id": session.charID, "skill_name": "战吼_stun",
+				"target_id": t.charID,
+			}})
+			continue
+		}
 		dmg := math.Round(calcDamage(session.attack*skill.Damage, t.defense))
 		if dmg < 1 {
 			dmg = 1
 		}
-		isCrit := rand.Float64() < (session.critRate + 0.05) // 技能暴击率比普攻高5%
+		isCrit := rand.Float64() < (session.critRate + 0.05)
 		if isCrit {
 			dmg = math.Round(dmg * session.critDmg)
 		}
@@ -812,9 +869,23 @@ func (s *DemoServer) handleCastSkillNPC(session *PlayerSession, data json.RawMes
 	}
 	session.mp -= skill.MPCost
 
-	// 旋风斩特殊处理：使用武器攻击范围
-	if skill.Name == "旋风斩" && session.weaponAttackRange > 0 {
-		skill.AreaSize = session.weaponAttackRange
+	// 猛击：扇形范围（与普攻一致），动态设置范围
+	if skill.Name == "猛击" {
+		skill.Range = session.weaponAttackDist
+		if skill.Range <= 0 {
+			skill.Range = 100.0
+		}
+	}
+	// 旋风斩：椭圆范围 = 武器距离
+	if skill.Name == "旋风斩" && session.weaponAttackDist > 0 {
+		skill.AreaSize = session.weaponAttackDist
+	}
+	// 战吼：椭圆范围 = 武器距离 × 3
+	if skill.Name == "战吼" {
+		skill.AreaSize = session.weaponAttackDist * 3
+		if skill.AreaSize <= 0 {
+			skill.AreaSize = 300.0
+		}
 	}
 
 	// 广播技能释放
@@ -822,6 +893,7 @@ func (s *DemoServer) handleCastSkillNPC(session *PlayerSession, data json.RawMes
 		"caster_id": session.charID, "skill_id": skill.ID, "skill_name": skill.Name,
 		"target_x": req.TargetX, "target_y": req.TargetY,
 		"area_type": skill.AreaType, "area_size": skill.AreaSize,
+		"caster_x": session.x, "caster_y": session.y,
 		"caster_mp": session.mp, "caster_max_mp": session.maxMP,
 	}})
 
@@ -839,10 +911,13 @@ func (s *DemoServer) handleCastSkillNPC(session *PlayerSession, data json.RawMes
 		switch skill.AreaType {
 		case "single":
 			hit = npc.ID == req.TargetID && distance(session.x, session.y, npc.X, npc.Y) <= skill.Range
+		case "fan":
+			dir := math.Atan2((req.TargetY-session.y)*2, req.TargetX-session.x)
+			hit = isInFanRange(session.x, session.y, npc.X, npc.Y, skill.Range, dir, math.Pi/4)
+		case "ellipse":
+			hit = isInEllipseRange(session.x, session.y, npc.X, npc.Y, skill.AreaSize)
 		case "circle":
 			hit = distance(req.TargetX, req.TargetY, npc.X, npc.Y) <= skill.AreaSize
-		case "fan":
-			hit = distance(session.x, session.y, npc.X, npc.Y) <= skill.Range
 		}
 		if hit {
 			hits = append(hits, npcHit{npc: npc})
@@ -890,21 +965,11 @@ func (s *DemoServer) handleCastSkillNPC(session *PlayerSession, data json.RawMes
 		s.arena.mu.Lock()
 	}
 
-	// 战吼恐惧效果：让范围内NPC远离战士，四处逃跑3秒
+	// 战吼昏迷效果：让范围内NPC昏迷3秒（无法行动）
 	if skill.Name == "战吼" {
 		for _, h := range hits {
 			if !h.npc.Dead {
-				// 计算远离方向
-				dx := h.npc.X - session.x
-				dy := h.npc.Y - session.y
-				dist := math.Sqrt(dx*dx + dy*dy)
-				if dist < 1 {
-					dist = 1
-				}
-				// 设置恐惧状态：NPC 向远离方向逃跑
-				h.npc.FearUntil = time.Now().UnixMilli() + 3000
-				h.npc.FearDirX = dx / dist
-				h.npc.FearDirY = dy / dist
+				h.npc.StunUntil = time.Now().UnixMilli() + 3000
 			}
 		}
 	}
@@ -962,7 +1027,16 @@ func (s *DemoServer) npcAITick() {
 			continue
 		}
 
-		// 0. 检查恐惧状态（战吼效果）
+		// 0. 检查昏迷状态（战吼效果）
+		if npc.StunUntil > 0 && now < npc.StunUntil {
+			// 昏迷中：无法行动
+			continue
+		}
+		if npc.StunUntil > 0 && now >= npc.StunUntil {
+			npc.StunUntil = 0
+		}
+
+		// 1. 检查恐惧状态（保留旧逻辑，战吼现在用昏迷，此分支暂不触发）
 		if npc.FearUntil > 0 && now < npc.FearUntil {
 			// 恐惧中：向远离方向逃跑
 			moveSpeed := npc.Speed * dt * 1.5 // 恐惧时跑得更快

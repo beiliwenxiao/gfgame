@@ -118,8 +118,8 @@ export class MeleeAttackSystem {
     // 安全区内禁止攻击（由 ArenaScene 设置）
     if (this._safeZoneDisabled) return;
 
-    // 鼠标左键按住触发攻击
-    if (this.inputManager.isMouseDown() && !this.inputManager.isMouseClickHandled()) {
+    // 鼠标左键按住触发攻击（右键不触发）
+    if (this.inputManager.isMouseDown() && this.inputManager.getMouseButton() === 0 && !this.inputManager.isMouseClickHandled()) {
       this.performSectorAttack(playerCenter, currentTime);
     }
   }

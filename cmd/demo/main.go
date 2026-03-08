@@ -122,6 +122,9 @@ type PlayerSession struct {
 	weaponAttackRange float64 // 武器攻击范围（像素）
 	weaponAttackDist  float64 // 武器攻击距离（像素）
 
+	// 昏迷状态（战吼效果）
+	StunUntil int64 // 昏迷结束时间（UnixMilli），0 表示无昏迷
+
 	// 增量同步：上次发送的快照（每个接收者独立）
 	lastSync map[int64]*playerSnapshot
 }
@@ -187,6 +190,9 @@ type ArenaNPC struct {
 	FearUntil int64   // 恐惧结束时间（UnixMilli），0 表示无恐惧
 	FearDirX  float64 // 恐惧逃跑方向 X
 	FearDirY  float64 // 恐惧逃跑方向 Y
+
+	// 昏迷状态（战吼对玩家效果）
+	StunUntil int64 // 昏迷结束时间（UnixMilli），0 表示无昏迷
 }
 
 type Arena struct {

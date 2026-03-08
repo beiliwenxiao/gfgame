@@ -92,6 +92,10 @@ export class NetworkCombatSystem {
             console.log('NetworkCombatSystem.attackTarget: 灵魂状态，禁止攻击');
             return;
         }
+        // 昏迷检查
+        if (scene.playerEntity && scene.playerEntity.stunUntil && Date.now() < scene.playerEntity.stunUntil) {
+            return;
+        }
 
         const isNPC = this._isNPCTarget(scene.selectedTarget);
         const entity = this._getTargetEntity(scene.selectedTarget);
@@ -155,8 +159,11 @@ export class NetworkCombatSystem {
     // ─── 施放技能 ───
     castSkill(skillId) {
         const scene = this.scene;
+        console.log('[NetworkCombat] castSkill called, skillId=', skillId, 'ws=', !!scene.ws, 'playerEntity=', !!scene.playerEntity, 'dead=', scene.playerEntity?.dead);
         if (!scene.ws || !scene.playerEntity) return;
         if (scene.playerEntity.dead) return;
+        // 昏迷检查
+        if (scene.playerEntity.stunUntil && Date.now() < scene.playerEntity.stunUntil) return;
 
         const now = Date.now();
         const cd = scene.skillCooldowns[skillId];
@@ -200,10 +207,36 @@ export class NetworkCombatSystem {
                 }
                 targetId = scene.selectedTarget;
 
-                // 范围预判
+                // 范围预判（按技能类型）
                 if (skill) {
-                    const combat = scene.playerEntity.getComponent('combat');
-                    if (combat && !combat.isInSkillRange(transform.position, { x: targetX, y: targetY }, skill)) {
+                    const sx = transform.position.x;
+                    const sy = transform.position.y;
+                    const tx = targetX;
+                    const ty = targetY;
+                    let inRange = true;
+
+                    if (skill.area_type === 'fan') {
+                        // 猛击：扇形判定（2.5D，半角 45°）
+                        const mas = scene.meleeAttackSystem;
+                        const range = skill.range > 0 ? skill.range : (mas ? mas.sliceAttackRange : 100);
+                        const dx = tx - sx;
+                        const dy2d = (ty - sy) * 2;
+                        const dist = Math.sqrt(dx * dx + dy2d * dy2d);
+                        if (dist > range) inRange = false;
+                        // 扇形角度判定：朝目标方向，半角 45°
+                        // 前端发送时 target 就是选中目标，方向即为目标方向，直接用距离判定即可
+                    } else if (skill.area_type === 'ellipse') {
+                        // 旋风斩/战吼：以玩家为中心的椭圆，不需要选中目标，直接放行
+                        inRange = true;
+                    } else {
+                        // single / circle：原有逻辑
+                        const combat = scene.playerEntity.getComponent('combat');
+                        if (combat && !combat.isInSkillRange(transform.position, { x: targetX, y: targetY }, skill)) {
+                            inRange = false;
+                        }
+                    }
+
+                    if (!inRange) {
                         if (scene.floatingTextManager) {
                             scene.floatingTextManager.addText(transform.position.x, transform.position.y - 20, '超出技能范围', '#ff6600');
                         }
@@ -297,6 +330,21 @@ export class NetworkCombatSystem {
     onSkillCasted(data) {
         const scene = this.scene;
 
+        // 战吼昏迷效果：给目标玩家设置昏迷状态
+        if (data.skill_name === '战吼_stun') {
+            const targetEntity = data.target_id === scene.selfId
+                ? scene.playerEntity
+                : scene.remotePlayers.get(data.target_id);
+            if (targetEntity) {
+                targetEntity.stunUntil = Date.now() + 3000;
+                const transform = targetEntity.getComponent('transform');
+                if (transform && scene.floatingTextManager) {
+                    scene.floatingTextManager.addText(transform.position.x, transform.position.y - 30, '昏迷!', '#cc88ff');
+                }
+            }
+            return;
+        }
+
         if (data.caster_id === scene.selfId && scene.playerEntity) {
             const stats = scene.playerEntity.getComponent('stats');
             if (stats) {
@@ -321,6 +369,44 @@ export class NetworkCombatSystem {
                     targetY: data.target_y,
                     areaSize: data.area_size || 0
                 });
+            }
+
+            // 战士技能范围指示器（只给自己的技能显示）
+            console.log('[SkillRange] onSkillCasted check:', 'caster=', data.caster_id, 'self=', scene.selfId, 'area_type=', data.area_type, 'area_size=', data.area_size, '_showSkillRange=', !!scene._showSkillRange);
+            if (data.caster_id === scene.selfId && transform && scene._showSkillRange) {
+                const footCenter = scene._getFootCenter && scene._getFootCenter();
+                console.log('[SkillRange] footCenter=', footCenter, 'areaType=', data.area_type);
+                if (footCenter) {
+                    const areaType = data.area_type;
+                    const equipment = scene.playerEntity.getComponent('equipment');
+                    const weapon = equipment ? equipment.getEquipment('mainhand') : null;
+                    const weaponDist = weapon ? (weapon.attackDistance || 100) : 100;
+
+                    if (areaType === 'fan') {
+                        // 猛击：扇形
+                        const range = data.area_size || weaponDist;
+                        const dir = Math.atan2((data.target_y || transform.position.y) - transform.position.y,
+                                               (data.target_x || transform.position.x) - transform.position.x);
+                        scene._showSkillRange({
+                            areaType: 'fan', x: footCenter.x, y: footCenter.y,
+                            rx: range, ry: range / 2, direction: dir,
+                            halfAngle: Math.PI / 4,
+                            color: 'rgba(255, 100, 30, 0.85)', fillColor: 'rgba(255, 100, 30, 0.12)',
+                            duration: 1.0
+                        });
+                    } else if (areaType === 'ellipse') {
+                        // 旋风斩 / 战吼：椭圆
+                        const radius = data.area_size || weaponDist;
+                        const isWarcry = data.skill_name === '战吼';
+                        scene._showSkillRange({
+                            areaType: 'ellipse', x: footCenter.x, y: footCenter.y,
+                            rx: radius, ry: radius / 2,
+                            color: isWarcry ? 'rgba(255, 200, 50, 0.85)' : 'rgba(100, 200, 255, 0.85)',
+                            fillColor: isWarcry ? 'rgba(255, 200, 50, 0.10)' : 'rgba(100, 200, 255, 0.10)',
+                            duration: 1.0
+                        });
+                    }
+                }
             }
         }
     }
@@ -348,8 +434,8 @@ export class NetworkCombatSystem {
         const combat = scene.playerEntity.getComponent('combat');
 
         // 武器冷却检查（与鼠标攻击共享同一冷却状态）
-        if (scene.meleeAttackSystem) {
-            const mas = scene.meleeAttackSystem;
+        const mas = scene.meleeAttackSystem;
+        if (mas) {
             const currentTime = performance.now() / 1000;
             let weaponCooldown = mas.sliceGlobalCooldown;
             const equipComp = scene.playerEntity.getComponent('equipment');
@@ -370,6 +456,22 @@ export class NetworkCombatSystem {
         let attacked = false;
         let firstTargetTransform = null;
 
+        // 获取扇形参数（从 MeleeAttackSystem 读取，与特效保持一致）
+        const sectorDir = mas ? mas.sectorDirection : 0;
+        let sectorHalfAngle = mas ? mas.sectorAngle / 2 : (Math.PI / 6);
+        let sectorRadius = maxRange;
+        if (mas) {
+            const equipComp2 = scene.playerEntity.getComponent('equipment');
+            if (equipComp2) {
+                const mainhand = equipComp2.getEquipment('mainhand');
+                if (mainhand) {
+                    if (mainhand.attackRange != null) sectorHalfAngle = (mainhand.attackRange * Math.PI / 180) / 2;
+                    if (mainhand.attackDistance != null) sectorRadius = mainhand.attackDistance;
+                }
+            }
+            if (sectorRadius === maxRange) sectorRadius = mas.sliceAttackRange;
+        }
+
         // 收集范围内所有存活目标
         const allTargets = [
             ...Array.from(scene.npcEntities.entries()).map(([id, e]) => ({ id, entity: e, isNPC: true })),
@@ -381,10 +483,19 @@ export class NetworkCombatSystem {
             const targetTransform = entity.getComponent('transform');
             if (!targetTransform) continue;
 
-            // 范围判定
-            if (combat && !combat.isInSkillRange(selfTransform.position, targetTransform.position, { range: maxRange, area_type: 'single' })) {
-                continue;
-            }
+            // 扇形范围判定（2.5D 椭圆修正：Y 轴压缩为 0.5）
+            const dx = targetTransform.position.x - selfTransform.position.x;
+            const dy = targetTransform.position.y - selfTransform.position.y;
+            const dy2d = dy * 2; // 还原等距压缩，用于角度计算
+            const dist2d = Math.sqrt(dx * dx + dy2d * dy2d);
+            if (dist2d > sectorRadius) continue;
+
+            // 角度判定（用 2.5D 还原后的方向）
+            const angle = Math.atan2(dy2d, dx);
+            let angleDiff = angle - sectorDir;
+            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+            if (Math.abs(angleDiff) > sectorHalfAngle) continue;
 
             const msgType = isNPC ? 'attack_npc' : 'attack';
             scene.ws.send(msgType, { target_id: id });
@@ -398,9 +509,9 @@ export class NetworkCombatSystem {
 
         // 触发弯刀攻击动画 + 刀光/箭光特效
         // 更新武器冷却时间（与鼠标攻击共享）
-        if (scene.meleeAttackSystem) {
-            scene.meleeAttackSystem.sliceLastAttackTime = performance.now() / 1000;
-            scene.meleeAttackSystem.sliceCooldownShown = false;
+        if (mas) {
+            mas.sliceLastAttackTime = performance.now() / 1000;
+            mas.sliceCooldownShown = false;
         }
         if (scene.weaponRenderer) {
             if (attacked && firstTargetTransform) {
@@ -414,7 +525,7 @@ export class NetworkCombatSystem {
         }
 
         // 触发刀光/箭光特效（复用 MeleeAttackSystem 的扇形特效）
-        if (scene.meleeAttackSystem && scene.playerEntity) {
+        if (mas && scene.playerEntity) {
             const sprite = scene.playerEntity.getComponent('sprite');
             const spriteHeight = sprite?.height || 64;
             const playerCenter = {
@@ -422,15 +533,14 @@ export class NetworkCombatSystem {
                 y: selfTransform.position.y - spriteHeight / 2
             };
             // 攻击方向：有目标时朝目标，无目标时用当前鼠标方向
-            let dir = scene.meleeAttackSystem.sectorDirection;
+            let dir = sectorDir;
             if (attacked && firstTargetTransform) {
                 const dx = firstTargetTransform.position.x - selfTransform.position.x;
                 const dy = firstTargetTransform.position.y - selfTransform.position.y;
                 dir = Math.atan2(dy, dx);
-                scene.meleeAttackSystem.sectorDirection = dir;
+                mas.sectorDirection = dir;
             }
-            const sectorRadius = scene.meleeAttackSystem.sliceAttackRange;
-            scene.meleeAttackSystem.spawnSectorSlashEffect(
+            mas.spawnSectorSlashEffect(
                 playerCenter, dir,
                 playerCenter.x, playerCenter.y,
                 sectorRadius
@@ -439,6 +549,25 @@ export class NetworkCombatSystem {
 
         if (!attacked) {
             console.log('NetworkCombatSystem.attackAllInRange: 范围内无目标');
+        }
+
+        // 触发普攻扇形范围指示器（脚下圆心，椭圆扇形）
+        const footCenter = scene._getFootCenter && scene._getFootCenter();
+        if (footCenter) {
+            scene._showSkillRange({
+                areaType: 'fan',
+                x: footCenter.x,
+                y: footCenter.y,
+                rx: sectorRadius,
+                ry: sectorRadius / 2,
+                direction: attacked && firstTargetTransform
+                    ? Math.atan2(firstTargetTransform.position.y - selfTransform.position.y, firstTargetTransform.position.x - selfTransform.position.x)
+                    : sectorDir,
+                halfAngle: sectorHalfAngle,
+                color: 'rgba(255, 160, 50, 0.85)',
+                fillColor: 'rgba(255, 160, 50, 0.10)',
+                duration: 1.0
+            });
         }
     }
 

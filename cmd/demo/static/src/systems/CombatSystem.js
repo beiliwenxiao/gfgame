@@ -1150,6 +1150,10 @@ export class CombatSystem {
               console.log('打坐技能需要场景支持');
             }
           }
+          // 联网模式：有 backendId 的技能走网络路径
+          else if (this._arenaMode && skill.backendId && this.onNetworkSkillCast) {
+            this.onNetworkSkillCast(skill.backendId);
+          }
           else {
             // 其他技能：使用鼠标位置作为目标点
             const mouseWorldPos = this.inputManager.getMouseWorldPosition(this.camera);

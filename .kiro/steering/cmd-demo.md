@@ -486,3 +486,141 @@ NPC AI 3 个位置（arena.go npcAITick）：
 ### 注意事项
 - `inputManager.markMouseClickHandled()` 必须在 `attackAllInRange()` 之前调用，防止 MovementSystem 同帧响应左键导致角色移动
 - 原有的 `attackTarget()` 仍保留用于单目标攻击场景（如技能指定目标）
+
+
+## 技能 area_type 驱动范围判定
+
+后端 `handleCastSkill` / `handleCastSkillNPC` 用 `skill.AreaType` switch 分支统一处理：
+- `fan` — 扇形（猛击），以施法者为中心，朝目标方向，半角 45°（π/4），用 `isInFanRange`
+- `ellipse` — 椭圆（旋风斩/战吼），以施法者为中心，用 `isInEllipseRange`
+- `circle` — 圆形，以目标点为中心
+- `single` — 单体，距离判定
+
+前端 `NetworkCombatSystem.castSkill` 也必须按 `area_type` 分支做预判，两端保持一致。漏掉任何一端会导致判定不一致（前端放行但后端拦截，或前端拦截但后端命中）。
+
+动态范围覆写规则（后端在 handler 里按技能名修改）：
+- 猛击：`skill.Range = session.weaponAttackDist`
+- 旋风斩：`skill.AreaSize = session.weaponAttackDist`
+- 战吼：`skill.AreaSize = session.weaponAttackDist * 3`
+
+## seed.go 技能数据版本检测
+
+通过查询具体技能的字段值来判断是否需要重建数据，比只检查 `COUNT(*)` 或 `icon_id` 更精准：
+
+```go
+var skillVersion string
+s.db.QueryRow("SELECT area_type FROM skill_defs WHERE name='猛击' LIMIT 1").Scan(&skillVersion)
+if skillVersion != "fan" {
+    // 旧数据，删除重建
+}
+```
+
+新增技能字段或修改技能属性后，更新此处的检测条件，确保旧数据库能自动重建。
+
+
+## 技能范围虚线的实现模式
+
+### 实时跟随 vs 临时效果
+- 范围指示器不能用"临时效果数组 + life 倒计时"模式，因为它需要每帧实时跟随玩家位置
+- 正确做法：每帧直接从 `transform.position` 读取坐标，在 `renderWorldObjects` 末尾直接绘制，不入队列、不存状态
+- 与 `boneCorpses` 的区别：范围指示器是"持续存在但条件显示"，不是"触发后倒计时消失"
+
+### arena_state 技能数据的 area_size 问题
+- `arena_state` 下发的 `skills` 是数据库原始数据，`area_size` 对旋风斩/战吼是 `0`
+- 后端在 `handleCastSkill` 里动态覆写 `AreaSize`，但不写入 `arena_state`
+- 前端范围预览必须用 `skill.area_size || weaponDist` 做 fallback（`0 || x` 在 JS 里会正确 fallback）
+
+### BottomControlBar skillIndex 映射
+- `skillSlots[i].skillIndex`：前2个槽是药水（`skillIndex = -1`），后5个是技能（`skillIndex = 0~4`）
+- 获取后端技能原始数据的链路：`hoveredSlot` → `skillSlots[i].skillIndex` → `combat.skills[skillIndex].backendId` → `this.skills.find(s => s.id === backendId)`
+
+### renderWorldObjects 的相机变换上下文
+- `renderWorldObjects` 在 `ctx.translate(-viewBounds.left, -viewBounds.top)` 之后调用，处于相机变换内部
+- 直接用世界坐标绘制即可，不需要手动换算屏幕坐标
+- `inputManager.getMouseWorldPosition(this.camera)` 返回世界坐标，与 `transform.position` 坐标系一致，可直接用于方向计算
+
+
+## 技能范围指示器的触发策略
+
+### 近战 vs 远程的显示差异
+- 战士近战技能（fan/ellipse）：**始终显示**范围圈跟随玩家，不需要任何触发条件（hover/按键），因为近战需要直观看到攻击覆盖区域
+- 弓箭手远程技能（circle/single）：不始终显示，范围以目标点为中心，跟随玩家没有意义
+- 过滤条件：`skill.class === 'warrior'` + `area_type !== 'single'` + `mp_cost > 0`
+
+### 不要用 hover 触发战斗相关的持续显示效果
+玩家操作时鼠标在世界区域（打怪/移动），不会悬停在底部 UI 上，`hoveredSlot` 始终为 `-1`。hover 只适合 tooltip 类的临时提示，不适合需要持续可见的战斗辅助信息。
+
+### 后端技能数据的 class 字段
+`arena_state` 下发的 `skills` 数组每个技能都有 `class` 字段（`"warrior"` / `"archer"`），前端可直接用于职业过滤，不需要额外映射表。
+
+
+## 触发式技能范围指示器
+
+### "临时效果 + 跟随实体"混合模式
+- `skillRangeIndicators` 数组存储指示器对象（含 `life` 倒计时），但渲染时不用存储的 `x/y`，而是每帧从 `_getFootCenter()` 实时读取玩家脚下坐标
+- 与纯临时效果（`boneCorpses`，坐标固定不动）不同，这是"有生命周期 + 实时跟随"的混合模式
+- 触发入口：`attackAllInRange()`（普攻）和 `onSkillCasted()`（技能），调用 `scene._showSkillRange(opts)` push 到数组
+
+### Canvas 虚线动画
+- `ctx.setLineDash([6, 4])` + `ctx.lineDashOffset = ind.dashOffset` 实现虚线流动
+- `update` 中每帧 `dashOffset += 60 * deltaTime` 递增偏移量
+- 容易遗漏：只设了 `setLineDash` 但忘了 `lineDashOffset`，虚线就是静止的
+
+### skill_casted 消息的范围数据
+- 后端 `skill_casted` 广播已包含 `area_type`、`area_size`，前端 `onSkillCasted` 直接读取
+- 比从本地 `this.skills` 反查更可靠，因为后端会动态覆写 `AreaSize`（旋风斩=武器距离，战吼=武器距离×3）
+
+### 触发式 vs 始终显示
+- 触发式（当前方案）：`_showSkillRange()` push 数组 → `update` 倒计时 → 渲染遍历，适合"反馈型"效果
+- 始终显示：`renderWorldObjects` 直接绘制，不需要数组/life，适合"规划型"效果
+
+
+## 指示器数组中的冗余坐标字段
+
+- `_showSkillRange` push 的对象包含 `x/y`（触发时的玩家坐标），但 `_renderSkillRangeIndicator` 渲染时用 `_getFootCenter()` 实时坐标覆盖，存储的 `x/y` 实际未使用
+- 当前只有自己的技能会触发指示器，所以直接读玩家坐标没问题
+- 未来如果需要显示其他实体的技能范围，应改为存储 entity 引用而非坐标
+
+## handleCastSkill 与 handleCastSkillNPC 的对称性
+
+- 两个 handler 的技能查找、MP 扣除、动态范围覆写（猛击/旋风斩/战吼）、`skill_casted` 广播字段完全对称
+- 修改技能逻辑时必须同时改两个 handler，漏改一个会导致打玩家和打 NPC 的行为不一致
+- 广播的 `skill_casted` 消息包含后端动态覆写后的 `area_size`，前端直接读取比本地反查更准确
+
+
+## 2.5D 椭圆扇形的完整实现模式
+
+普攻（`attackAllInRange`）和猛击（`handleCastSkill` fan 分支）共用椭圆扇形判定：
+
+### 三处一致性
+1. 前端渲染（`_renderSkillRangeIndicator`）：`rx = radius, ry = radius/2`，`ctx.lineTo(cx + cos(a)*rx, cy + sin(a)*ry)`
+2. 前端碰撞（`attackAllInRange`）：`dy2d = dy * 2` 还原等距压缩，`dist2d = sqrt(dx² + dy2d²)`，角度用 `atan2(dy2d, dx)`
+3. 后端碰撞（`isInFanRange`）：同样 `dy * 2` 还原，`math.Atan2` 计算方向
+
+三处 Y 轴压缩比必须一致（均为 0.5），改任何一处都要同步其余两处。
+
+### 普攻扇形参数的读取链路
+- `sectorDir`：`meleeAttackSystem.sectorDirection`（每帧跟随鼠标维护）
+- `sectorHalfAngle`：`mainhand.attackRange`（角度制 → 弧度 `* π/180 / 2`）
+- `sectorRadius`：`mainhand.attackDistance`，fallback `meleeAttackSystem.sliceAttackRange`
+- 与 `MeleeAttackSystem` 单机扇形攻击共享同一数据源，联网/单机攻击范围一致
+
+
+## handleSkillInput 的联网模式盲区与修复
+
+### 问题
+`CombatSystem.handleSkillInput` 是键盘数字键（3-7）触发技能的唯一入口。内部有 `basic_attack`、`heal`、`meditation` 三个特殊分支，其余技能走 `tryUseSkillAtPosition`（单机本地执行）。
+
+`injectBackendSkills` 注入的技能 id 格式为 `backend_18`，不匹配任何特殊分支，直接掉进单机 else 分支，导致：
+- 不发 WebSocket → 后端无响应 → 无 `skill_casted` → 范围指示器不触发
+- 单机执行产生 `伤害: NaN` 副作用（无正确攻击力数据）
+
+### 修复模式：onNetworkSkillCast 回调
+在 `handleSkillInput` 的 else 分支前插入条件：`_arenaMode && skill.backendId && onNetworkSkillCast`，命中时调用回调走联网路径。
+
+- `ArenaScene.enter`：`combatSystem.onNetworkSkillCast = (skillId) => this.castSkill(skillId)`
+- `ArenaScene.exit`：`combatSystem.onNetworkSkillCast = null`
+- 键盘和 UI 点击两条路径最终汇入 `NetworkCombatSystem.castSkill`
+
+### 通用规律
+`CombatSystem` 每次联网场景新增功能入口时，都需检查 `handleSkillInput`、`handlePlayerDeath` 等方法是否有单机逻辑被意外触发。`_arenaMode` 标志 + 回调委托是标准分离模式。

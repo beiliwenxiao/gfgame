@@ -237,41 +237,11 @@ export class NetworkCombatSystem {
         if (scene.playerEntity.dead) return;
         if (!scene.inputManager.isMouseClicked() || scene.inputManager.getMouseButton() !== 0 || scene.inputManager.isMouseClickHandled()) return;
 
-        const mouseWorldPos = scene.inputManager.getMouseWorldPosition(scene.camera);
-        if (!mouseWorldPos) return;
-
-        const clickRange = 40;
-        let closestEntity = null;
-        let closestDist = clickRange;
-
-        const candidates = [
-            ...Array.from(scene.npcEntities.values()).map(e => ({ entity: e, id: e.npcId })),
-            ...Array.from(scene.remotePlayers.entries()).map(([id, e]) => ({ entity: e, id }))
-        ];
-
-        for (const { entity, id } of candidates) {
-            if (entity.dead) continue;
-            const transform = entity.getComponent('transform');
-            if (!transform) continue;
-            const dx = mouseWorldPos.x - transform.position.x;
-            const dy = mouseWorldPos.y - transform.position.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist < closestDist) { closestDist = dist; closestEntity = { entity, id }; }
-        }
-
-        if (closestEntity) {
-            const selfT = scene.playerEntity.getComponent('transform');
-            if (selfT && scene.isInSafeZone(selfT.position.x, selfT.position.y)) {
-                if (scene.floatingTextManager) {
-                    scene.floatingTextManager.addText(selfT.position.x, selfT.position.y - 20, '安全区内禁止战斗', '#ffaa00');
-                }
-                scene.inputManager.markMouseClickHandled();
-                return;
-            }
-            scene.selectedTarget = closestEntity.id;
-            scene.inputManager.markMouseClickHandled();
-        }
+        // 左键点击 = 群攻范围内所有敌人（与空格键效果一致）
+        scene.inputManager.markMouseClickHandled();
+        this.attackAllInRange();
     }
+
 
     // ─── 处理伤害消息 ───
     onDamage(data) {
@@ -355,17 +325,83 @@ export class NetworkCombatSystem {
         }
     }
 
+    // ─── 群攻：攻击范围内所有敌人 ───
+    attackAllInRange() {
+        const scene = this.scene;
+        console.log('NetworkCombatSystem.attackAllInRange: 进入, ws=', !!scene.ws, 'playerEntity=', !!scene.playerEntity, 'dead=', scene.playerEntity?.dead);
+        if (!scene.ws || !scene.playerEntity) return;
+        if (scene.playerEntity.dead) return;
+
+        const selfTransform = scene.playerEntity.getComponent('transform');
+        if (!selfTransform) return;
+
+        // 安全区检查
+        if (scene.isInSafeZone(selfTransform.position.x, selfTransform.position.y)) {
+            console.log('NetworkCombatSystem.attackAllInRange: 安全区内，return');
+            if (scene.floatingTextManager) {
+                scene.floatingTextManager.addText(selfTransform.position.x, selfTransform.position.y - 20, '安全区内禁止攻击', '#ffaa00');
+            }
+            // 安全区内仍触发弯刀挥砍动画（只有视觉，不造成伤害）
+            if (scene.weaponRenderer) {
+                scene.weaponRenderer.startAttack('thrust');
+            }
+            return;
+        }
+
+        const maxRange = this._getWeaponRange();
+        const combat = scene.playerEntity.getComponent('combat');
+        let attacked = false;
+        let firstTargetTransform = null;
+
+        // 收集范围内所有存活目标
+        const allTargets = [
+            ...Array.from(scene.npcEntities.entries()).map(([id, e]) => ({ id, entity: e, isNPC: true })),
+            ...Array.from(scene.remotePlayers.entries()).map(([id, e]) => ({ id, entity: e, isNPC: false }))
+        ];
+
+        for (const { id, entity, isNPC } of allTargets) {
+            if (entity.dead) continue;
+            const targetTransform = entity.getComponent('transform');
+            if (!targetTransform) continue;
+
+            // 范围判定
+            if (combat && !combat.isInSkillRange(selfTransform.position, targetTransform.position, { range: maxRange, area_type: 'single' })) {
+                continue;
+            }
+
+            const msgType = isNPC ? 'attack_npc' : 'attack';
+            scene.ws.send(msgType, { target_id: id });
+
+            if (!attacked) {
+                firstTargetTransform = targetTransform;
+                scene.selectedTarget = id;
+            }
+            attacked = true;
+        }
+
+        // 触发弯刀攻击动画
+        if (scene.weaponRenderer) {
+            if (attacked && firstTargetTransform) {
+                // 有命中目标：朝第一个目标方向
+                const dx = firstTargetTransform.position.x - selfTransform.position.x;
+                const dy = firstTargetTransform.position.y - selfTransform.position.y;
+                scene.weaponRenderer.currentMouseAngle = Math.atan2(dy, dx);
+            }
+            // 无论是否命中目标都触发弯刀特效（无目标时朝当前鼠标方向）
+            scene.weaponRenderer.startAttack('thrust');
+        }
+
+        if (!attacked) {
+            console.log('NetworkCombatSystem.attackAllInRange: 范围内无目标');
+        }
+    }
+
     // ─── 空格键攻击（在 update 中调用） ───
     handleSpaceAttack() {
         const scene = this.scene;
         if (!scene.inputManager || !scene.inputManager.isKeyPressed('space')) return;
 
-        console.log('NetworkCombatSystem: 空格键按下，selectedTarget=', scene.selectedTarget, 'playerDead=', scene.playerEntity?.dead);
-
-        if (!scene.selectedTarget && scene.playerEntity && !scene.playerEntity.dead) {
-            this.autoSelectNearestEnemy();
-            console.log('NetworkCombatSystem: 自动选中最近敌人，selectedTarget=', scene.selectedTarget);
-        }
-        this.attackTarget();
+        console.log('NetworkCombatSystem: 空格键按下, weaponRenderer=', !!scene.weaponRenderer, 'ws=', !!scene.ws, 'playerEntity=', !!scene.playerEntity, 'dead=', scene.playerEntity?.dead);
+        this.attackAllInRange();
     }
 }

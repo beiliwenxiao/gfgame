@@ -240,8 +240,12 @@ func (s *DemoServer) Start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleWS)
 
-	// 静态文件服务
-	mux.Handle("/", http.FileServer(http.Dir("static")))
+	// 静态文件服务（开发模式：禁用缓存，强制浏览器每次重新加载）
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		http.FileServer(http.Dir("static")).ServeHTTP(w, r)
+	}))
 
 	// 启动竞技场 tick 循环（状态同步）
 	go s.arenaTick()

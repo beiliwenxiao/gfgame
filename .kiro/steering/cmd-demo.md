@@ -440,3 +440,26 @@ NPC AI 3 个位置（arena.go npcAITick）：
 ### `entity.dead` 为 undefined 的特性
 - 未死亡的实体 `dead` 属性为 `undefined`（非 `false`），依赖 JS falsy 判定
 - `dead` 是动态挂载属性，不在组件初始化时设定
+
+
+## 群攻模式（attackAllInRange）
+
+### 机制
+- `attackAllInRange()` 遍历 `npcEntities` + `remotePlayers` 所有存活目标，用 `combat.isInSkillRange` 做范围判定，对每个命中目标单独发送 `attack_npc`/`attack` 消息
+- 后端每条消息独立处理，不需要新增群攻协议
+- 弯刀动画朝向第一个命中目标（`Math.atan2` 计算角度）
+- `selectedTarget` 自动设为第一个命中目标（用于 UI 高亮），但攻击本身不依赖它
+
+### 触发入口
+- 空格键：`handleSpaceAttack()` → `attackAllInRange()`
+- 左键点击：`handleEnemySelection()` → `attackAllInRange()`
+- 两者效果完全一致，左键不做"选中目标"，直接群攻
+
+### 弯刀特效必须无条件触发
+- `attackAllInRange()` 中 `weaponRenderer.startAttack('thrust')` 不能放在 `if (attacked)` 条件内，否则范围内无敌人时按空格/左键没有挥刀动画
+- 正确模式：有目标时 `currentMouseAngle` 朝目标方向，无目标时保持当前鼠标方向（由 `BaseGameScene.update` → `updateMouseAngle` 每帧维护），然后无条件调用 `startAttack`
+- `startAttack()` 内部有 `if (this.attackAnimation.active) return` 防重入，不会叠加动画
+
+### 注意事项
+- `inputManager.markMouseClickHandled()` 必须在 `attackAllInRange()` 之前调用，防止 MovementSystem 同帧响应左键导致角色移动
+- 原有的 `attackTarget()` 仍保留用于单目标攻击场景（如技能指定目标）

@@ -14,7 +14,10 @@ func (s *Store) SeedDefaultEquipment() error {
 		// 检查技能数据版本：猛击的 area_type 是否已更新为 fan
 		var skillVersion string
 		s.db.QueryRow("SELECT area_type FROM skill_defs WHERE name='猛击' LIMIT 1").Scan(&skillVersion)
-		if hasIconID == 0 || skillVersion != "fan" {
+		// 检查战吼伤害是否已更新为 0.3
+		var warcryDmg float64
+		s.db.QueryRow("SELECT damage FROM skill_defs WHERE name='战吼' LIMIT 1").Scan(&warcryDmg)
+		if hasIconID == 0 || skillVersion != "fan" || warcryDmg < 0.29 {
 			// 旧数据，删除重建
 			log.Println("检测到旧数据，重新初始化...")
 			s.db.Exec("DELETE FROM equipment_defs")
@@ -74,8 +77,8 @@ func (s *Store) SeedDefaultEquipment() error {
 		{Name: "猛击", Class: "warrior", Damage: 2.0, MPCost: 15, Cooldown: 3.0, Range: 0, AreaType: "fan"},
 		// 旋风斩：80% 伤害/秒，以玩家为中心的椭圆范围（武器距离），后端动态设置 AreaSize
 		{Name: "旋风斩", Class: "warrior", Damage: 0.8, MPCost: 25, Cooldown: 5.0, Range: 0, AreaType: "ellipse", AreaSize: 0},
-		// 战吼：昏迷3秒，椭圆范围 = 武器距离×3，后端动态设置 AreaSize
-		{Name: "战吼", Class: "warrior", Damage: 0, MPCost: 20, Cooldown: 10.0, Range: 0, AreaType: "ellipse", AreaSize: 0},
+		// 战吼：30% 伤害 + 恐惧逃跑3秒，椭圆范围 = 武器距离×3，后端动态设置 AreaSize
+		{Name: "战吼", Class: "warrior", Damage: 0.3, MPCost: 20, Cooldown: 10.0, Range: 0, AreaType: "ellipse", AreaSize: 0},
 		// 弓箭手技能
 		{Name: "射击", Class: "archer", Damage: 1.0, MPCost: 0, Cooldown: 0.6, Range: 200, AreaType: "single"},
 		{Name: "多重射击", Class: "archer", Damage: 0.8, MPCost: 20, Cooldown: 4.0, Range: 180, AreaType: "circle", AreaSize: 10},

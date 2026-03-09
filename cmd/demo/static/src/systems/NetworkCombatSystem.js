@@ -164,6 +164,8 @@ export class NetworkCombatSystem {
         if (scene.playerEntity.dead) return;
         // 昏迷检查
         if (scene.playerEntity.stunUntil && Date.now() < scene.playerEntity.stunUntil) return;
+        // 恐惧检查
+        if (scene.playerEntity.fearUntil && Date.now() < scene.playerEntity.fearUntil) return;
 
         const now = Date.now();
         const cd = scene.skillCooldowns[skillId];
@@ -254,7 +256,7 @@ export class NetworkCombatSystem {
             const combat = scene.playerEntity.getComponent('combat');
             if (combat) {
                 const combatSkillId = `backend_${skillId}`;
-                combat.skillCooldowns.set(combatSkillId, now);
+                combat.skillCooldowns.set(combatSkillId, performance.now());
                 combat.startSkillPipeline({
                     ...skill,
                     phaseDurations: { windup: 100, hit: 50, settle: 50, recovery: 200 }
@@ -330,16 +332,18 @@ export class NetworkCombatSystem {
     onSkillCasted(data) {
         const scene = this.scene;
 
-        // 战吼昏迷效果：给目标玩家设置昏迷状态
-        if (data.skill_name === '战吼_stun') {
+        // 战吼恐惧效果：给目标玩家设置恐惧状态（自动远离施法者逃跑）
+        if (data.skill_name === '战吼_fear') {
             const targetEntity = data.target_id === scene.selfId
                 ? scene.playerEntity
                 : scene.remotePlayers.get(data.target_id);
             if (targetEntity) {
-                targetEntity.stunUntil = Date.now() + 3000;
+                targetEntity.fearUntil = Date.now() + 3000;
+                targetEntity.fearDirX = data.fear_dir_x || 0;
+                targetEntity.fearDirY = data.fear_dir_y || 0;
                 const transform = targetEntity.getComponent('transform');
                 if (transform && scene.floatingTextManager) {
-                    scene.floatingTextManager.addText(transform.position.x, transform.position.y - 30, '昏迷!', '#cc88ff');
+                    scene.floatingTextManager.addText(transform.position.x, transform.position.y - 30, '恐惧!', '#ff4444');
                 }
             }
             return;
@@ -401,8 +405,8 @@ export class NetworkCombatSystem {
                         scene._showSkillRange({
                             areaType: 'ellipse', x: footCenter.x, y: footCenter.y,
                             rx: radius, ry: radius / 2,
-                            color: isWarcry ? 'rgba(255, 200, 50, 0.85)' : 'rgba(100, 200, 255, 0.85)',
-                            fillColor: isWarcry ? 'rgba(255, 200, 50, 0.10)' : 'rgba(100, 200, 255, 0.10)',
+                            color: isWarcry ? 'rgba(255, 60, 60, 0.85)' : 'rgba(100, 200, 255, 0.85)',
+                            fillColor: isWarcry ? 'rgba(255, 60, 60, 0.12)' : 'rgba(100, 200, 255, 0.10)',
                             duration: 1.0
                         });
                     }
@@ -417,6 +421,8 @@ export class NetworkCombatSystem {
         console.log('NetworkCombatSystem.attackAllInRange: 进入, ws=', !!scene.ws, 'playerEntity=', !!scene.playerEntity, 'dead=', scene.playerEntity?.dead);
         if (!scene.ws || !scene.playerEntity) return;
         if (scene.playerEntity.dead) return;
+        // 恐惧检查
+        if (scene.playerEntity.fearUntil && Date.now() < scene.playerEntity.fearUntil) return;
 
         const selfTransform = scene.playerEntity.getComponent('transform');
         if (!selfTransform) return;

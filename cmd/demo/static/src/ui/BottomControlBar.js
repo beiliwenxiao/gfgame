@@ -455,6 +455,14 @@ export class BottomControlBar extends UIElement {
     
     // 优先使用技能自带的 icon 属性
     if (skill.icon) {
+      // 技能背景光晕（如果有 iconGlow 属性）
+      if (skill.iconGlow) {
+        const glowGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, halfSize * 0.8);
+        glowGrad.addColorStop(0, skill.iconGlow);
+        glowGrad.addColorStop(1, 'transparent');
+        ctx.fillStyle = glowGrad;
+        ctx.fillRect(-halfSize, -halfSize, size, size);
+      }
       ctx.font = `${size * 0.55}px Arial`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';

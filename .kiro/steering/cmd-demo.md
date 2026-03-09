@@ -624,3 +624,10 @@ if skillVersion != "fan" {
 
 ### 通用规律
 `CombatSystem` 每次联网场景新增功能入口时，都需检查 `handleSkillInput`、`handlePlayerDeath` 等方法是否有单机逻辑被意外触发。`_arenaMode` 标志 + 回调委托是标准分离模式。
+
+
+## PlayerSession vs ArenaNPC 字段差异
+
+- `ArenaNPC`（main.go）已有 `FearUntil/FearDirX/FearDirY` 等 AI 状态字段，`PlayerSession` 不一定有
+- 两者虽然都在 `main.go` 中定义，字段集合不同（NPC 有 AI 相关字段，玩家有装备/同步相关字段）
+- 改技能效果涉及玩家和 NPC 双目标时，必须分别确认两个 struct 的字段是否齐全，不能看到一个有就以为另一个也有

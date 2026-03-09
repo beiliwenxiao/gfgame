@@ -339,12 +339,51 @@ func (s *DemoServer) handleCastSkill(session *PlayerSession, data json.RawMessag
 	}
 	s.arena.mu.RUnlock()
 	for _, t := range targets {
-		// 战吼：昏迷效果，不造成伤害
+		// 战吼：造成 30% 伤害 + 恐惧逃跑 3 秒
 		if skill.Name == "战吼" {
-			t.StunUntil = time.Now().UnixMilli() + 3000
+			// 计算伤害
+			dmg := math.Round(calcDamage(session.attack*skill.Damage, t.defense))
+			if dmg < 1 {
+				dmg = 1
+			}
+			isCrit := rand.Float64() < (session.critRate + 0.05)
+			if isCrit {
+				dmg = math.Round(dmg * session.critDmg)
+			}
+			t.hp -= dmg
+			if t.hp < 0 {
+				t.hp = 0
+			}
+			s.arena.BroadcastAll(ServerMessage{Type: MsgDamageDealt, Data: map[string]interface{}{
+				"attacker_id": session.charID, "target_id": t.charID,
+				"damage": dmg, "is_crit": isCrit,
+				"target_hp": t.hp, "target_max_hp": t.maxHP, "skill_name": skill.Name,
+			}})
+			if t.hp <= 0 {
+				t.dead = true
+				s.arena.BroadcastAll(ServerMessage{Type: MsgPlayerDied, Data: map[string]interface{}{
+					"char_id": t.charID, "name": t.charName,
+					"killer_id": session.charID, "killer": session.charName,
+				}})
+				continue
+			}
+			// 恐惧效果：让目标远离施法者逃跑 3 秒
+			dx := t.x - session.x
+			dy := t.y - session.y
+			dist := math.Sqrt(dx*dx + dy*dy)
+			if dist > 0 {
+				t.FearDirX = dx / dist
+				t.FearDirY = dy / dist
+			} else {
+				angle := rand.Float64() * math.Pi * 2
+				t.FearDirX = math.Cos(angle)
+				t.FearDirY = math.Sin(angle)
+			}
+			t.FearUntil = time.Now().UnixMilli() + 3000
 			s.arena.BroadcastAll(ServerMessage{Type: MsgSkillCasted, Data: map[string]interface{}{
-				"caster_id": session.charID, "skill_name": "战吼_stun",
+				"caster_id": session.charID, "skill_name": "战吼_fear",
 				"target_id": t.charID,
+				"fear_dir_x": t.FearDirX, "fear_dir_y": t.FearDirY,
 			}})
 			continue
 		}
@@ -965,11 +1004,23 @@ func (s *DemoServer) handleCastSkillNPC(session *PlayerSession, data json.RawMes
 		s.arena.mu.Lock()
 	}
 
-	// 战吼昏迷效果：让范围内NPC昏迷3秒（无法行动）
+	// 战吼恐惧效果：让范围内NPC恐惧逃跑3秒
 	if skill.Name == "战吼" {
 		for _, h := range hits {
 			if !h.npc.Dead {
-				h.npc.StunUntil = time.Now().UnixMilli() + 3000
+				dx := h.npc.X - session.x
+				dy := h.npc.Y - session.y
+				dist := math.Sqrt(dx*dx + dy*dy)
+				if dist > 0 {
+					h.npc.FearDirX = dx / dist
+					h.npc.FearDirY = dy / dist
+				} else {
+					angle := rand.Float64() * math.Pi * 2
+					h.npc.FearDirX = math.Cos(angle)
+					h.npc.FearDirY = math.Sin(angle)
+				}
+				h.npc.FearUntil = time.Now().UnixMilli() + 3000
+				h.npc.TargetID = 0
 			}
 		}
 	}

@@ -592,10 +592,18 @@ export class MeleeAttackSystem {
         ctx.stroke();
       }
     } else {
-      // 近战扇形
+      // 近战椭圆扇形（2.5D 等距视角：ry = r/2）
+      const rx = r;
+      const ry = r / 2;
+      const steps = 32;
+
+      // 填充
       ctx.beginPath();
       ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, r, dir - halfAngle, dir + halfAngle);
+      for (let i = 0; i <= steps; i++) {
+        const a = (dir - halfAngle) + (i / steps) * halfAngle * 2;
+        ctx.lineTo(cx + Math.cos(a) * rx, cy + Math.sin(a) * ry);
+      }
       ctx.closePath();
       if (flashAlpha > 0) {
         ctx.fillStyle = `rgba(255, 100, 100, ${0.12 + flashAlpha * 0.4})`;
@@ -603,10 +611,14 @@ export class MeleeAttackSystem {
         ctx.fillStyle = 'rgba(255, 100, 100, 0.12)';
       }
       ctx.fill();
-      
+
+      // 描边
       ctx.beginPath();
       ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, r, dir - halfAngle, dir + halfAngle);
+      for (let i = 0; i <= steps; i++) {
+        const a = (dir - halfAngle) + (i / steps) * halfAngle * 2;
+        ctx.lineTo(cx + Math.cos(a) * rx, cy + Math.sin(a) * ry);
+      }
       ctx.closePath();
       ctx.strokeStyle = flashAlpha > 0 ? `rgba(255, 150, 150, ${0.6 + flashAlpha * 0.4})` : 'rgba(255, 100, 100, 0.6)';
       ctx.lineWidth = 1.5;

@@ -316,7 +316,30 @@ export class ArenaScene extends BaseGameScene {
         const nowMs = Date.now();
         const isStunned = this.playerEntity && this.playerEntity.stunUntil && nowMs < this.playerEntity.stunUntil;
 
-        // 发送移动到服务端（昏迷时不发送）
+        // 恐惧状态检查（战吼恐惧效果）
+        const isFeared = this.playerEntity && this.playerEntity.fearUntil && nowMs < this.playerEntity.fearUntil;
+
+        // 恐惧期间自动远离施法者方向逃跑
+        if (isFeared && this.playerEntity) {
+            const transform = this.playerEntity.getComponent('transform');
+            const stats = this.playerEntity.getComponent('stats');
+            if (transform) {
+                const speed = (stats && stats.speed) ? stats.speed : 120;
+                const fearSpeed = speed * 1.5; // 恐惧时跑得更快
+                const fdx = this.playerEntity.fearDirX || 0;
+                const fdy = this.playerEntity.fearDirY || 0;
+                transform.position.x += fdx * fearSpeed * deltaTime;
+                transform.position.y += fdy * fearSpeed * deltaTime;
+                // 边界限制
+                transform.position.x = Math.max(-960 + 30, Math.min(960 - 30, transform.position.x));
+                transform.position.y = Math.max(30, Math.min(600 - 30, transform.position.y));
+                // 设置行走动画
+                const sprite = this.playerEntity.getComponent('sprite');
+                if (sprite) sprite.isWalking = true;
+            }
+        }
+
+        // 发送移动到服务端（昏迷时不发送，恐惧移动需要同步位置）
         if (!isStunned) this.sendMovement();
         
         // 插值远程玩家位置 + 同步行走动画
@@ -431,8 +454,8 @@ export class ArenaScene extends BaseGameScene {
             return m.life > 0;
         });
         
-        // 空格键触发普攻（委托 NetworkCombatSystem，昏迷时禁止）
-        if (!isStunned) this.networkCombat.handleSpaceAttack();
+        // 空格键触发普攻（委托 NetworkCombatSystem，昏迷/恐惧时禁止）
+        if (!isStunned && !isFeared) this.networkCombat.handleSpaceAttack();
 
         // 更新火堆动画
         this.updateCampfireAnimation(deltaTime);
@@ -445,8 +468,8 @@ export class ArenaScene extends BaseGameScene {
                 safeZoneDisabled = true;
             }
         }
-        // 昏迷时同样禁用单机战斗系统
-        if (safeZoneDisabled || isStunned) {
+        // 昏迷/恐惧时同样禁用单机战斗系统
+        if (safeZoneDisabled || isStunned || isFeared) {
             if (this.meleeAttackSystem) this.meleeAttackSystem._safeZoneDisabled = true;
             if (this.combatSystem) this.combatSystem._safeZoneDisabled = true;
         }
@@ -455,7 +478,7 @@ export class ArenaScene extends BaseGameScene {
         super.update(deltaTime);
         
         // 恢复单机战斗系统
-        if (safeZoneDisabled || isStunned) {
+        if (safeZoneDisabled || isStunned || isFeared) {
             if (this.meleeAttackSystem) this.meleeAttackSystem._safeZoneDisabled = false;
             if (this.combatSystem) this.combatSystem._safeZoneDisabled = false;
         }
@@ -1528,11 +1551,17 @@ export class ArenaScene extends BaseGameScene {
         const skillIconMap = {
             '猛击': '🪓',
             '旋风斩': '🌀',
-            '战吼': '📢',
+            '战吼': '�',
             '射击': '🏹',
             '多重射击': '🎯',
             '闪电箭': '⚡',
             '天降箭雨': '🌧️'
+        };
+        
+        // 技能图标光晕映射（血色斧头等特殊效果）
+        const skillGlowMap = {
+            '猛击': 'rgba(180, 0, 0, 0.4)',
+            '战吼': 'rgba(180, 0, 30, 0.35)',
         };
         
         backendSkills.forEach(sk => {
@@ -1544,7 +1573,8 @@ export class ArenaScene extends BaseGameScene {
                 manaCost: sk.mp_cost,
                 effectType: sk.name, // 用名字做 effectType
                 castTime: 0,
-                icon: skillIconMap[sk.name] || '⚡'
+                icon: skillIconMap[sk.name] || '⚡',
+                iconGlow: skillGlowMap[sk.name] || null
             });
         });
         
@@ -1640,58 +1670,141 @@ export class ArenaScene extends BaseGameScene {
 
             switch (skillName) {
                 case '猛击': {
-                    // 血色粒子效果 - 模拟血溅射
+                    // 血色粒子效果 - 模拟血溅射（多层次血色）
+                    // 第一层：大颗血滴飞溅
                     this.particleSystem.emitBurst({
                         position: { x: targetX, y: targetY },
                         velocity: { x: 0, y: 0 },
-                        life: 500,
-                        size: 5,
+                        life: 600,
+                        size: 6,
                         color: '#cc0000',
-                        alpha: 0.9,
-                        gravity: 50,
-                        friction: 0.92
-                    }, 20, {
-                        velocityRange: { min: 30, max: 100 },
+                        alpha: 0.95,
+                        gravity: 80,
+                        friction: 0.90
+                    }, 15, {
+                        velocityRange: { min: 60, max: 150 },
                         angleRange: { min: 0, max: Math.PI * 2 },
-                        sizeRange: { min: 3, max: 7 },
-                        lifeRange: { min: 300, max: 600 }
+                        sizeRange: { min: 4, max: 8 },
+                        lifeRange: { min: 400, max: 700 }
+                    });
+                    // 第二层：细小血雾扩散
+                    this.particleSystem.emitBurst({
+                        position: { x: targetX, y: targetY },
+                        velocity: { x: 0, y: 0 },
+                        life: 400,
+                        size: 3,
+                        color: '#880000',
+                        alpha: 0.7,
+                        gravity: 20,
+                        friction: 0.95
+                    }, 12, {
+                        velocityRange: { min: 20, max: 80 },
+                        angleRange: { min: 0, max: Math.PI * 2 },
+                        sizeRange: { min: 2, max: 5 },
+                        lifeRange: { min: 300, max: 500 }
+                    });
+                    // 第三层：明亮血色闪光（斧头劈砍的火花）
+                    this.particleSystem.emitBurst({
+                        position: { x: targetX, y: targetY },
+                        velocity: { x: 0, y: 0 },
+                        life: 250,
+                        size: 4,
+                        color: '#ff3333',
+                        alpha: 1.0,
+                        gravity: 0,
+                        friction: 0.85
+                    }, 8, {
+                        velocityRange: { min: 80, max: 180 },
+                        angleRange: { min: 0, max: Math.PI * 2 },
+                        sizeRange: { min: 2, max: 5 },
+                        lifeRange: { min: 150, max: 300 }
                     });
                     break;
                 }
                 case '旋风斩': {
-                    // 旋风粒子效果 - 围绕施法者旋转
+                    // 旋风粒子效果 - 多层旋转风刃
                     const radius = areaSize || 80;
-                    for (let i = 0; i < 24; i++) {
-                        const angle = (i / 24) * Math.PI * 2;
+                    // 外圈旋风（快速旋转的风刃粒子）
+                    for (let i = 0; i < 30; i++) {
+                        const angle = (i / 30) * Math.PI * 2;
+                        const r = radius * (0.4 + Math.random() * 0.6);
                         this.particleSystem.emit({
-                            position: { x: casterX + Math.cos(angle) * radius * 0.5, y: casterY + Math.sin(angle) * radius * 0.5 },
-                            velocity: { x: Math.cos(angle + Math.PI / 2) * 100, y: Math.sin(angle + Math.PI / 2) * 100 },
-                            life: 500,
-                            size: 3 + Math.random() * 3,
-                            color: '#88ccff',
-                            alpha: 0.8,
+                            position: { x: casterX + Math.cos(angle) * r, y: casterY + Math.sin(angle) * r * 0.5 },
+                            velocity: { x: Math.cos(angle + Math.PI / 2) * 120, y: Math.sin(angle + Math.PI / 2) * 60 },
+                            life: 600,
+                            size: 3 + Math.random() * 4,
+                            color: '#aaddff',
+                            alpha: 0.85,
                             gravity: 0,
-                            friction: 0.95
+                            friction: 0.93
                         });
                     }
-                    break;
-                }
-                case '战吼': {
-                    // 冲击波粒子 - 从施法者向外扩散
+                    // 内圈旋风（较小、较快）
+                    for (let i = 0; i < 16; i++) {
+                        const angle = (i / 16) * Math.PI * 2 + Math.random() * 0.3;
+                        const r = radius * 0.3;
+                        this.particleSystem.emit({
+                            position: { x: casterX + Math.cos(angle) * r, y: casterY + Math.sin(angle) * r * 0.5 },
+                            velocity: { x: Math.cos(angle + Math.PI / 2) * 160, y: Math.sin(angle + Math.PI / 2) * 80 },
+                            life: 400,
+                            size: 2 + Math.random() * 2,
+                            color: '#ffffff',
+                            alpha: 0.9,
+                            gravity: 0,
+                            friction: 0.90
+                        });
+                    }
+                    // 地面尘土飞扬
                     this.particleSystem.emitBurst({
                         position: { x: casterX, y: casterY },
                         velocity: { x: 0, y: 0 },
-                        life: 600,
-                        size: 5,
-                        color: '#ffaa00',
-                        alpha: 0.85,
-                        gravity: 0,
-                        friction: 0.93
-                    }, 30, {
-                        velocityRange: { min: 60, max: 120 },
+                        life: 500,
+                        size: 4,
+                        color: '#998866',
+                        alpha: 0.5,
+                        gravity: -10,
+                        friction: 0.92
+                    }, 10, {
+                        velocityRange: { min: 30, max: 80 },
                         angleRange: { min: 0, max: Math.PI * 2 },
-                        sizeRange: { min: 3, max: 7 },
-                        lifeRange: { min: 400, max: 700 }
+                        sizeRange: { min: 3, max: 6 },
+                        lifeRange: { min: 300, max: 600 }
+                    });
+                    break;
+                }
+                case '战吼': {
+                    // 恐惧冲击波粒子 - 从施法者向外扩散的红色恐惧波
+                    // 第一层：红色冲击波环
+                    this.particleSystem.emitBurst({
+                        position: { x: casterX, y: casterY },
+                        velocity: { x: 0, y: 0 },
+                        life: 700,
+                        size: 6,
+                        color: '#ff4444',
+                        alpha: 0.9,
+                        gravity: 0,
+                        friction: 0.94
+                    }, 25, {
+                        velocityRange: { min: 80, max: 160 },
+                        angleRange: { min: 0, max: Math.PI * 2 },
+                        sizeRange: { min: 4, max: 8 },
+                        lifeRange: { min: 500, max: 800 }
+                    });
+                    // 第二层：暗红色恐惧气息
+                    this.particleSystem.emitBurst({
+                        position: { x: casterX, y: casterY },
+                        velocity: { x: 0, y: 0 },
+                        life: 500,
+                        size: 4,
+                        color: '#880022',
+                        alpha: 0.7,
+                        gravity: -15,
+                        friction: 0.92
+                    }, 15, {
+                        velocityRange: { min: 40, max: 100 },
+                        angleRange: { min: 0, max: Math.PI * 2 },
+                        sizeRange: { min: 3, max: 6 },
+                        lifeRange: { min: 400, max: 600 }
                     });
                     break;
                 }

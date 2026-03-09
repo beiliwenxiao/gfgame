@@ -125,6 +125,11 @@ type PlayerSession struct {
 	// 昏迷状态（战吼效果）
 	StunUntil int64 // 昏迷结束时间（UnixMilli），0 表示无昏迷
 
+	// 恐惧状态（战吼效果）
+	FearUntil int64   // 恐惧结束时间（UnixMilli），0 表示无恐惧
+	FearDirX  float64 // 恐惧逃跑方向 X
+	FearDirY  float64 // 恐惧逃跑方向 Y
+
 	// 增量同步：上次发送的快照（每个接收者独立）
 	lastSync map[int64]*playerSnapshot
 }

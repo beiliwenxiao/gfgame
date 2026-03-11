@@ -631,3 +631,43 @@ if skillVersion != "fan" {
 - `ArenaNPC`（main.go）已有 `FearUntil/FearDirX/FearDirY` 等 AI 状态字段，`PlayerSession` 不一定有
 - 两者虽然都在 `main.go` 中定义，字段集合不同（NPC 有 AI 相关字段，玩家有装备/同步相关字段）
 - 改技能效果涉及玩家和 NPC 双目标时，必须分别确认两个 struct 的字段是否齐全，不能看到一个有就以为另一个也有
+
+
+## 武器攻击属性的语义分离
+
+### attackRange vs attackDistance
+- `attackRange`（角度，度数）= **技能**扇形范围，不用于普攻判定
+- `attackDistance`（像素）= **普攻**距离判定
+- 后端 `handleAttack`/`handleAttackNPC` 必须用 `weaponAttackDist`，不能用 `weaponAttackRange`
+- 战士武器：`attackRange=90°`（近战扇形），`attackDistance=100px`
+- 弓箭手武器：`attackRange=30°`（技能扇形备用），`attackDistance=250px`
+
+### 远程 vs 近战普攻判定分离
+- 近战普攻：扇形判定（角度 + 距离），用 `sectorHalfAngle` + `sectorRadius`
+- 远程普攻：全方向距离判定（只看 `attackDistance`，不限角度）
+- `attackAllInRange` 里用 `mas.sectorIsRanged` 分支区分两种判定
+
+### 前端装备字段映射的坑
+- 后端 JSON 字段名：`attack_range`、`attack_distance`、`attack_interval`（snake_case）
+- `loadBackendEquipments` 里 `item.subType` 默认被设成槽位名（`'mainhand'`），导致 `checkIsRangedWeapon` 识别失败（它检查 `subType === 'bow'`）
+- 弓箭手武器必须显式设 `item.subType = 'bow'`，才能触发箭矢消耗和箭光特效
+
+### `_getWeaponRange` 返回值语义
+- 必须返回 `attackDistance`（像素距离），不能返回 `attackRange`（角度值）
+- 原来返回角度值（30）被当距离用，导致弓箭手普攻几乎打不到任何人
+
+
+## npcAITick 的时序竞态与幽灵攻击
+
+### 问题根源
+`npcAITick` 执行模式：持锁 → 收集攻击列表 → 解锁 → 广播。在解锁到广播之间存在时间窗口，玩家可能在此期间击杀了 NPC（`handleAttackNPC` 设 `npc.Dead=true` 并广播 `npc_died`）。前端可能先收到 `npc_died`（删除实体），再收到 `npcAITick` 广播的 `damage_dealt`，造成"幽灵攻击"。
+
+### 修复模式：双层防护
+- 后端（`arena.go`）：广播攻击前再次加读锁检查 NPC 是否仍存活，已死亡则 `continue` 丢弃
+- 前端（`NetworkCombatSystem.onDamage`）：收到 `attacker_is_npc` 时，验证攻击者 NPC 是否还在 `npcEntities` 且 `dead/isDead` 未设置，不满足则 `return`
+
+### 通用规律：锁外广播的竞态窗口
+Go 的"锁内收集、锁外广播"模式在高并发下必然存在竞态窗口。广播前应再次验证数据有效性，不能假设锁内收集的数据在广播时仍然有效。
+
+### 前端消息处理的防御性原则
+WebSocket 消息到达顺序不保证与服务端发送顺序完全一致。处理任何消息时，都应检查相关实体是否仍然存在且状态有效，不能假设"先发的消息一定先到"。

@@ -566,7 +566,7 @@ export class MeleeAttackSystem {
     const flashAlpha = Math.max(0, this.sectorAttackFlash / 0.2);
     
     if (this.sectorIsRanged) {
-      // 远程：椭圆瞄准框
+      // 远程：鼠标周围绿色小虚线圆圈
       const mouseWorldPos = this.inputManager.getMouseWorldPosition(camera);
       if (mouseWorldPos) {
         const dx = mouseWorldPos.x - cx;
@@ -582,14 +582,17 @@ export class MeleeAttackSystem {
         
         if (inRange) {
           ctx.strokeStyle = flashAlpha > 0 ? `rgba(0, 255, 0, ${0.8 + flashAlpha * 0.2})` : 'rgba(0, 255, 0, 0.7)';
-          ctx.fillStyle = `rgba(0, 255, 0, ${0.08 + flashAlpha * 0.15})`;
+          ctx.fillStyle = `rgba(0, 255, 0, ${0.05 + flashAlpha * 0.1})`;
         } else {
-          ctx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
-          ctx.fillStyle = 'rgba(255, 0, 0, 0.08)';
+          ctx.strokeStyle = 'rgba(160, 160, 160, 0.6)';
+          ctx.fillStyle = 'rgba(160, 160, 160, 0.04)';
         }
         ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.lineDashOffset = -dashOffset;
         ctx.fill();
         ctx.stroke();
+        ctx.setLineDash([]);
       }
     } else {
       // 近战椭圆扇形（2.5D 等距视角：ry = r/2）

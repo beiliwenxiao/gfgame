@@ -221,14 +221,19 @@ func (s *DemoServer) sendCharFullInfo(session *PlayerSession) {
 		// 更新武器攻击范围
 		session.weaponAttackRange = 60.0
 		session.weaponAttackDist = 100.0
+		session.weaponIsRanged = false
 		if session.charClass == "archer" {
-			session.weaponAttackRange = 200.0
+			session.weaponAttackRange = 30.0  // 弓箭手扇形角度（度数）
 			session.weaponAttackDist = 250.0
+			session.weaponIsRanged = true
 		}
 		for _, eq := range equips {
 			if eq.SlotType == "weapon" && eq.Def.AttackRange > 0 {
 				session.weaponAttackRange = eq.Def.AttackRange
 				session.weaponAttackDist = eq.Def.AttackDistance
+				if eq.Def.Class == "archer" {
+					session.weaponIsRanged = true
+				}
 			}
 		}
 	}

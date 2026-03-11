@@ -33,14 +33,16 @@ export class NetworkCombatSystem {
     // ─── 辅助：获取武器攻击范围 ───
     _getWeaponRange() {
         const entity = this.scene.playerEntity;
-        if (!entity) return 60;
+        if (!entity) return 100;
         const equipment = entity.getComponent('equipment');
         if (equipment) {
             const weapon = equipment.getEquipment('mainhand');
-            if (weapon && weapon.attackRange) return weapon.attackRange;
+            // 返回攻击距离（像素），不是角度
+            if (weapon && weapon.attackDistance) return weapon.attackDistance;
+            if (weapon && weapon.attackRange && weapon.subType !== 'bow') return weapon.attackRange;
         }
         const charClass = entity.class || 'warrior';
-        return charClass === 'archer' ? 200 : 60;
+        return charClass === 'archer' ? 250 : 100;
     }
 
     // ─── 自动选中最近敌人 ───
@@ -198,6 +200,44 @@ export class NetworkCombatSystem {
         let targetY = transform.position.y;
         let targetId = 0;
 
+        // circle 类型技能（弓箭手 AOE）：以鼠标世界坐标为目标点
+        if (skill && skill.area_type === 'circle' && scene.inputManager && scene.camera) {
+            const mouseWorld = scene.inputManager.getMouseWorldPosition(scene.camera);
+            if (mouseWorld) {
+                targetX = mouseWorld.x;
+                targetY = mouseWorld.y;
+            }
+            // 范围预判：施法者到目标点的距离不能超过技能 range
+            const dx = targetX - transform.position.x;
+            const dy2d = (targetY - transform.position.y) * 2;
+            const dist = Math.sqrt(dx * dx + dy2d * dy2d);
+            if (skill.range > 0 && dist > skill.range) {
+                if (scene.floatingTextManager) {
+                    scene.floatingTextManager.addText(transform.position.x, transform.position.y - 20, '超出技能范围', '#ff6600');
+                }
+                return;
+            }
+            // 如果有选中目标，也发送 target_id
+            if (scene.selectedTarget) {
+                targetId = scene.selectedTarget;
+            }
+            const isNPC = scene.selectedTarget && scene.selectedTarget < 0;
+            const msgType = isNPC ? 'cast_skill_npc' : 'cast_skill';
+            scene.ws.send(msgType, { skill_id: skillId, target_id: targetId, target_x: targetX, target_y: targetY });
+
+            scene.skillCooldowns[skillId] = now + skill.cooldown * 1000;
+            const combat = scene.playerEntity.getComponent('combat');
+            if (combat) {
+                const combatSkillId = `backend_${skillId}`;
+                combat.skillCooldowns.set(combatSkillId, performance.now());
+                combat.startSkillPipeline({
+                    ...skill,
+                    phaseDurations: { windup: 100, hit: 50, settle: 50, recovery: 200 }
+                });
+            }
+            return;
+        }
+
         const isNPC = scene.selectedTarget && scene.selectedTarget < 0;
         if (scene.selectedTarget) {
             const target = this._getTargetEntity(scene.selectedTarget);
@@ -282,6 +322,16 @@ export class NetworkCombatSystem {
     onDamage(data) {
         const scene = this.scene;
         console.log('NetworkCombatSystem.onDamage: 收到伤害数据', data);
+
+        // 如果攻击者是 NPC，但该 NPC 已经死亡/不存在，忽略此伤害
+        // （时序竞态：npcAITick 锁内收集攻击列表，解锁后广播；此时 NPC 可能已被玩家击杀）
+        if (data.attacker_is_npc) {
+            const attackerNPC = scene.npcEntities.get(data.attacker_id);
+            if (!attackerNPC || attackerNPC.dead || attackerNPC.isDead) {
+                console.log('NetworkCombatSystem.onDamage: 攻击者 NPC 已死亡，忽略伤害，attacker_id=', data.attacker_id);
+                return;
+            }
+        }
 
         let targetEntity;
         if (data.target_is_npc) {
@@ -409,6 +459,27 @@ export class NetworkCombatSystem {
                             fillColor: isWarcry ? 'rgba(255, 60, 60, 0.12)' : 'rgba(100, 200, 255, 0.10)',
                             duration: 1.0
                         });
+                    } else if (areaType === 'circle') {
+                        // 弓箭手技能：圆形范围（以目标点为中心，2.5D 椭圆渲染）
+                        const radius = data.area_size || 20;
+                        let circleColor, circleFill;
+                        if (data.skill_name === '闪电箭') {
+                            circleColor = 'rgba(68, 170, 255, 0.85)';
+                            circleFill = 'rgba(68, 170, 255, 0.15)';
+                        } else if (data.skill_name === '天降箭雨') {
+                            circleColor = 'rgba(255, 140, 50, 0.85)';
+                            circleFill = 'rgba(255, 140, 50, 0.15)';
+                        } else {
+                            circleColor = 'rgba(255, 200, 50, 0.85)';
+                            circleFill = 'rgba(255, 200, 50, 0.12)';
+                        }
+                        scene._showSkillRange({
+                            areaType: 'circle',
+                            targetX: data.target_x, targetY: data.target_y,
+                            rx: radius, ry: radius / 2,
+                            color: circleColor, fillColor: circleFill,
+                            duration: 1.2
+                        });
                     }
                 }
             }
@@ -462,16 +533,18 @@ export class NetworkCombatSystem {
         let attacked = false;
         let firstTargetTransform = null;
 
-        // 获取扇形参数（从 MeleeAttackSystem 读取，与特效保持一致）
+        // 获取攻击参数
         const sectorDir = mas ? mas.sectorDirection : 0;
         let sectorHalfAngle = mas ? mas.sectorAngle / 2 : (Math.PI / 6);
         let sectorRadius = maxRange;
+        const isRanged = mas ? mas.sectorIsRanged : false;
         if (mas) {
             const equipComp2 = scene.playerEntity.getComponent('equipment');
             if (equipComp2) {
                 const mainhand = equipComp2.getEquipment('mainhand');
                 if (mainhand) {
-                    if (mainhand.attackRange != null) sectorHalfAngle = (mainhand.attackRange * Math.PI / 180) / 2;
+                    // 近战：attackRange 是角度（度数），转半角弧度
+                    if (!isRanged && mainhand.attackRange != null) sectorHalfAngle = (mainhand.attackRange * Math.PI / 180) / 2;
                     if (mainhand.attackDistance != null) sectorRadius = mainhand.attackDistance;
                 }
             }
@@ -489,19 +562,21 @@ export class NetworkCombatSystem {
             const targetTransform = entity.getComponent('transform');
             if (!targetTransform) continue;
 
-            // 扇形范围判定（2.5D 椭圆修正：Y 轴压缩为 0.5）
             const dx = targetTransform.position.x - selfTransform.position.x;
             const dy = targetTransform.position.y - selfTransform.position.y;
-            const dy2d = dy * 2; // 还原等距压缩，用于角度计算
+            const dy2d = dy * 2; // 还原 2.5D Y 轴压缩
             const dist2d = Math.sqrt(dx * dx + dy2d * dy2d);
             if (dist2d > sectorRadius) continue;
 
-            // 角度判定（用 2.5D 还原后的方向）
-            const angle = Math.atan2(dy2d, dx);
-            let angleDiff = angle - sectorDir;
-            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-            if (Math.abs(angleDiff) > sectorHalfAngle) continue;
+            if (!isRanged) {
+                // 近战：扇形角度判定
+                const angle = Math.atan2(dy2d, dx);
+                let angleDiff = angle - sectorDir;
+                while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                if (Math.abs(angleDiff) > sectorHalfAngle) continue;
+            }
+            // 远程：只做距离判定，全方向都能攻击到
 
             const msgType = isNPC ? 'attack_npc' : 'attack';
             scene.ws.send(msgType, { target_id: id });
@@ -555,25 +630,6 @@ export class NetworkCombatSystem {
 
         if (!attacked) {
             console.log('NetworkCombatSystem.attackAllInRange: 范围内无目标');
-        }
-
-        // 触发普攻扇形范围指示器（脚下圆心，椭圆扇形）
-        const footCenter = scene._getFootCenter && scene._getFootCenter();
-        if (footCenter) {
-            scene._showSkillRange({
-                areaType: 'fan',
-                x: footCenter.x,
-                y: footCenter.y,
-                rx: sectorRadius,
-                ry: sectorRadius / 2,
-                direction: attacked && firstTargetTransform
-                    ? Math.atan2(firstTargetTransform.position.y - selfTransform.position.y, firstTargetTransform.position.x - selfTransform.position.x)
-                    : sectorDir,
-                halfAngle: sectorHalfAngle,
-                color: 'rgba(255, 160, 50, 0.85)',
-                fillColor: 'rgba(255, 160, 50, 0.10)',
-                duration: 1.0
-            });
         }
     }
 

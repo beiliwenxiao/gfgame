@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"math"
 	"math/rand"
@@ -125,16 +126,22 @@ func (s *DemoServer) handleEnterArena(session *PlayerSession) {
 
 	// 从装备中读取武器攻击范围
 	equips, _ := s.db.GetCharEquipments(session.charID)
-	session.weaponAttackRange = 60.0  // 默认近战范围
-	session.weaponAttackDist = 100.0
+	session.weaponAttackRange = 60.0  // 默认近战扇形角度（度数）
+	session.weaponAttackDist = 100.0  // 默认近战距离（像素）
+	session.weaponIsRanged = false
 	if session.charClass == "archer" {
-		session.weaponAttackRange = 200.0
-		session.weaponAttackDist = 250.0
+		session.weaponAttackRange = 30.0  // 弓箭手默认扇形角度（度数）
+		session.weaponAttackDist = 250.0  // 弓箭手默认攻击距离（像素）
+		session.weaponIsRanged = true
 	}
 	for _, eq := range equips {
 		if eq.SlotType == "weapon" && eq.Def.AttackRange > 0 {
 			session.weaponAttackRange = eq.Def.AttackRange
 			session.weaponAttackDist = eq.Def.AttackDistance
+			// 有 pierce 或 multi_arrow 效果的武器视为远程
+			if eq.Def.Class == "archer" {
+				session.weaponIsRanged = true
+			}
 		}
 	}
 
@@ -214,15 +221,16 @@ func (s *DemoServer) handleAttack(session *PlayerSession, data json.RawMessage) 
 		return
 	}
 	dist := distance(session.x, session.y, target.x, target.y)
-	maxRange := session.weaponAttackRange
-	if maxRange <= 0 {
-		maxRange = 60.0
+	maxDist := session.weaponAttackDist
+	if maxDist <= 0 {
+		maxDist = 100.0
 	}
-	if dist > maxRange {
+	if dist > maxDist {
 		session.Send(ServerMessage{Type: MsgError, Data: "超出攻击范围"})
 		return
 	}
 	damage := calcDamage(session.attack, target.defense)
+	damage *= 0.5 // PVP 伤害减半
 	isCrit := rand.Float64() < session.critRate
 	if isCrit {
 		damage *= session.critDmg
@@ -342,7 +350,7 @@ func (s *DemoServer) handleCastSkill(session *PlayerSession, data json.RawMessag
 		// 战吼：造成 30% 伤害 + 恐惧逃跑 3 秒
 		if skill.Name == "战吼" {
 			// 计算伤害
-			dmg := math.Round(calcDamage(session.attack*skill.Damage, t.defense))
+			dmg := math.Round(calcDamage(session.attack*skill.Damage, t.defense) * 0.5) // PVP 减半
 			if dmg < 1 {
 				dmg = 1
 			}
@@ -387,7 +395,7 @@ func (s *DemoServer) handleCastSkill(session *PlayerSession, data json.RawMessag
 			}})
 			continue
 		}
-		dmg := math.Round(calcDamage(session.attack*skill.Damage, t.defense))
+		dmg := math.Round(calcDamage(session.attack*skill.Damage, t.defense) * 0.5) // PVP 减半
 		if dmg < 1 {
 			dmg = 1
 		}
@@ -771,16 +779,37 @@ func (s *DemoServer) getAllNPCStates() []map[string]interface{} {
 	return result
 }
 
-// tryNPCDrop NPC死亡时随机掉落红瓶或蓝瓶（50%几率）
+// tryNPCDrop NPC死亡时随机掉落物品（50%几率）
 func (s *DemoServer) tryNPCDrop(npc *ArenaNPC, killerID int64) {
 	if rand.Float64() > 0.5 {
 		return // 50% 不掉落
 	}
 	dropType := "health_potion"
 	dropName := "红瓶"
-	if rand.Float64() < 0.5 {
+	r := rand.Float64()
+	if r < 0.35 {
+		// 35% 掉红瓶
+		dropType = "health_potion"
+		dropName = "红瓶"
+	} else if r < 0.65 {
+		// 30% 掉蓝瓶
 		dropType = "mana_potion"
 		dropName = "蓝瓶"
+	} else {
+		// 35% 掉木箭（1-50根）
+		arrowCount := rand.Intn(50) + 1
+		dropType = "wood_arrow"
+		dropName = fmt.Sprintf("木箭x%d", arrowCount)
+		s.arena.BroadcastAll(ServerMessage{Type: MsgNPCDrop, Data: map[string]interface{}{
+			"npc_id":      npc.ID,
+			"x":           npc.X,
+			"y":           npc.Y,
+			"drop_type":   dropType,
+			"drop_name":   dropName,
+			"drop_count":  arrowCount,
+			"killer_id":   killerID,
+		}})
+		return
 	}
 	s.arena.BroadcastAll(ServerMessage{Type: MsgNPCDrop, Data: map[string]interface{}{
 		"npc_id":    npc.ID,
@@ -817,11 +846,11 @@ func (s *DemoServer) handleAttackNPC(session *PlayerSession, data json.RawMessag
 	}
 
 	dist := distance(session.x, session.y, npc.X, npc.Y)
-	maxRange := session.weaponAttackRange
-	if maxRange <= 0 {
-		maxRange = 60.0
+	maxDist := session.weaponAttackDist
+	if maxDist <= 0 {
+		maxDist = 100.0
 	}
-	if dist > maxRange {
+	if dist > maxDist {
 		s.arena.mu.Unlock()
 		session.Send(ServerMessage{Type: MsgError, Data: "超出攻击范围"})
 		return
@@ -1250,8 +1279,15 @@ func (s *DemoServer) npcAITick() {
 		}})
 	}
 
-	// 广播 NPC 攻击伤害
+	// 广播 NPC 攻击伤害（再次检查 NPC 是否仍存活，过滤时序竞态产生的幽灵攻击）
 	for _, atk := range attacks {
+		s.arena.mu.RLock()
+		npc, npcAlive := s.arena.npcs[atk.npcID]
+		stillAlive := npcAlive && !npc.Dead
+		s.arena.mu.RUnlock()
+		if !stillAlive {
+			continue // NPC 已被击杀，丢弃此攻击消息
+		}
 		s.arena.BroadcastAll(ServerMessage{Type: MsgDamageDealt, Data: map[string]interface{}{
 			"attacker_id":    atk.npcID,
 			"target_id":      atk.targetID,

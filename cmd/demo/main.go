@@ -119,8 +119,9 @@ type PlayerSession struct {
 	direction string // "up","down","left","right"
 
 	// 武器属性
-	weaponAttackRange float64 // 武器攻击范围（像素）
-	weaponAttackDist  float64 // 武器攻击距离（像素）
+	weaponAttackRange float64 // 武器攻击角度（度数，用于扇形判定）
+	weaponAttackDist  float64 // 武器攻击距离（像素，用于距离判定）
+	weaponIsRanged    bool    // 是否远程武器
 
 	// 昏迷状态（战吼效果）
 	StunUntil int64 // 昏迷结束时间（UnixMilli），0 表示无昏迷

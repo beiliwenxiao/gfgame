@@ -1235,6 +1235,17 @@ export class ArenaScene extends BaseGameScene {
                     ctx.ellipse(cx, cy, ind.rx, ind.ry, 0, 0, Math.PI * 2);
                     ctx.fill();
                     ctx.stroke();
+
+                } else if (ind.areaType === 'circle') {
+                    // 圆形范围（以目标点为中心，不跟随玩家）— 2.5D 椭圆渲染
+                    const tcx = ind.targetX || cx;
+                    const tcy = ind.targetY || cy;
+                    ctx.strokeStyle = ind.color || 'rgba(100, 200, 255, 0.85)';
+                    ctx.fillStyle = ind.fillColor || 'rgba(100, 200, 255, 0.08)';
+                    ctx.beginPath();
+                    ctx.ellipse(tcx, tcy, ind.rx, ind.ry, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
                 }
             }
 
@@ -1257,6 +1268,8 @@ export class ArenaScene extends BaseGameScene {
             y: opts.y,
             rx: opts.rx,
             ry: opts.ry,
+            targetX: opts.targetX,
+            targetY: opts.targetY,
             direction: opts.direction || 0,
             halfAngle: opts.halfAngle || Math.PI / 4,
             color: opts.color,
@@ -1598,7 +1611,8 @@ export class ArenaScene extends BaseGameScene {
             'weapon': 'mainhand',
             'helmet': 'helmet',
             'armor': 'armor',
-            'boots': 'boots'
+            'boots': 'boots',
+            'ammo': 'offhand'
         };
         
         // 后端 quality -> 前端 rarity 数值映射
@@ -1613,12 +1627,37 @@ export class ArenaScene extends BaseGameScene {
         const charClass = this.playerEntity.class || 'warrior';
         const WEAPON_PROPS = {
             'warrior': { attackSpeed: 2.0, attackRange: 90, attackDistance: 100 },
-            'archer': { attackSpeed: 3.0, attackRange: 200, attackDistance: 250 }
+            'archer': { attackSpeed: 3.0, attackRange: 30, attackDistance: 250 }  // attackRange=角度（度数）
         };
         
+        // 先合并弹药数量（多捆合并为一个 offhand 条目）
+        let totalAmmoQuantity = 0;
+        let ammoItem = null;
+        for (const eq of backendEquips) {
+            if (eq.slot_type === 'ammo') {
+                totalAmmoQuantity += (eq.quantity || 1);
+                if (!ammoItem) {
+                    ammoItem = {
+                        id: eq.def.icon_id || eq.def.id,
+                        name: eq.def.name,
+                        type: 'ammo',
+                        subType: 'ammo',
+                        rarity: QUALITY_MAP[eq.def.quality] !== undefined ? QUALITY_MAP[eq.def.quality] : 0,
+                        level: eq.def.level,
+                        stats: { attack: eq.def.attack || 0, defense: 0, maxHp: 0, speed: 0 }
+                    };
+                }
+            }
+        }
+        if (ammoItem) {
+            ammoItem.quantity = totalAmmoQuantity;
+            equipment.equip('offhand', ammoItem);
+        }
+
         for (const eq of backendEquips) {
             const def = eq.def;
             if (!def) continue;
+            if (eq.slot_type === 'ammo') continue; // 已单独处理
             
             const frontendSlot = SLOT_MAP[eq.slot_type];
             if (!frontendSlot) continue;
@@ -1648,6 +1687,11 @@ export class ArenaScene extends BaseGameScene {
                 item.attackDistance = eq.def.attack_distance || weaponProps.attackDistance;
                 item.pierce = eq.def.pierce || 0;
                 item.multiArrow = eq.def.multi_arrow || 0;
+                // 弓箭类武器标记为远程，subType 设为 'bow' 让 checkIsRangedWeapon 能识别
+                if (charClass === 'archer' || eq.def.pierce > 0 || eq.def.multi_arrow > 0) {
+                    item.ranged = true;
+                    item.subType = 'bow';
+                }
             }
             
             equipment.equip(frontendSlot, item);
@@ -1956,7 +2000,7 @@ export class ArenaScene extends BaseGameScene {
             });
         }
         
-        // 如果是自己击杀的，自动拾取（恢复HP/MP）
+        // 如果是自己击杀的，自动拾取（恢复HP/MP 或增加箭矢）
         if (data.killer_id === this.selfId && this.playerEntity) {
             const stats = this.playerEntity.getComponent('stats');
             if (stats) {
@@ -1986,6 +2030,34 @@ export class ArenaScene extends BaseGameScene {
                                 `+${mana} MP`,
                                 '#44aaff'
                             );
+                        }
+                    }
+                } else if (data.drop_type === 'wood_arrow') {
+                    // 木箭：加入 offhand 弹药数量
+                    const equipment = this.playerEntity.getComponent('equipment');
+                    if (equipment) {
+                        const offhand = equipment.getEquipment('offhand');
+                        const count = data.drop_count || 1;
+                        if (offhand && offhand.subType === 'ammo') {
+                            offhand.quantity = (offhand.quantity || 0) + count;
+                        } else {
+                            // 没有弹药槽，创建木箭条目
+                            equipment.equip('offhand', {
+                                id: 'wooden_arrow', name: '木箭', type: 'ammo', subType: 'ammo',
+                                rarity: 0, level: 1, quantity: count,
+                                stats: { attack: 0, defense: 0, maxHp: 0, speed: 0 }
+                            });
+                        }
+                        if (this.floatingTextManager) {
+                            const transform = this.playerEntity.getComponent('transform');
+                            if (transform) {
+                                this.floatingTextManager.addText(
+                                    transform.position.x,
+                                    transform.position.y - 20,
+                                    `+${count} 木箭`,
+                                    '#88ccff'
+                                );
+                            }
                         }
                     }
                 }

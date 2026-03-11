@@ -52,6 +52,7 @@ func (s *Store) AutoMigrate() error {
 			character_id INTEGER NOT NULL,
 			equip_def_id INTEGER NOT NULL,
 			slot_type TEXT NOT NULL,
+			quantity INTEGER DEFAULT 1,
 			FOREIGN KEY (character_id) REFERENCES characters(id),
 			FOREIGN KEY (equip_def_id) REFERENCES equipment_defs(id)
 		)`,
@@ -81,6 +82,7 @@ func (s *Store) AutoMigrate() error {
 		"ALTER TABLE equipment_defs ADD COLUMN attack_interval REAL DEFAULT 0",
 		"ALTER TABLE equipment_defs ADD COLUMN attack_range REAL DEFAULT 0",
 		"ALTER TABLE equipment_defs ADD COLUMN attack_distance REAL DEFAULT 0",
+		"ALTER TABLE char_equipments ADD COLUMN quantity INTEGER DEFAULT 1",
 	}
 	for _, stmt := range alterStmts {
 		s.db.Exec(stmt) // 忽略 "duplicate column" 错误

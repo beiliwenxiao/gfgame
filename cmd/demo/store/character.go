@@ -9,11 +9,11 @@ import (
 var classBaseStats = map[string]Character{
 	"warrior": {
 		HP: 200, MaxHP: 200, MP: 60, MaxMP: 60,
-		Attack: 18, Defense: 12, Speed: 130, CritRate: 0.05,
+		Attack: 18, Defense: 30, Speed: 130, CritRate: 0.05,
 	},
 	"archer": {
 		HP: 130, MaxHP: 130, MP: 100, MaxMP: 100,
-		Attack: 14, Defense: 6, Speed: 180, CritRate: 0.12,
+		Attack: 14, Defense: 20, Speed: 180, CritRate: 0.12,
 	},
 }
 

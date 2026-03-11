@@ -194,11 +194,11 @@ export class SkillEffects {
       case 'archer_multi_shot':
         this.createMultiArrowEffect(position, target, onHit);
         break;
-      case 'archer_poison_arrow':
-        this.createPoisonArrowEffect(position, target, onHit);
+      case 'archer_lightning_arrow':
+        this.createLightningArrowEffect(position, target, onHit);
         break;
-      case 'archer_trap':
-        this.createTrapEffect(position);
+      case 'archer_arrow_rain':
+        this.createArrowRainEffect(position, target, onHit);
         break;
       
       default:
@@ -604,8 +604,8 @@ export class SkillEffects {
   createMultiArrowEffect(position, target, onHit) {
     if (!target) return;
     
-    // 创建3支箭，稍微分散
-    const angles = [-0.2, 0, 0.2]; // 弧度偏移
+    // 创建5支箭，分散射向目标区域
+    const angles = [-0.3, -0.15, 0, 0.15, 0.3]; // 5支箭弧度偏移
     
     for (const angleOffset of angles) {
       const dx = target.x - position.x;
@@ -764,6 +764,187 @@ export class SkillEffects {
         sizeRange: { min: 4, max: 8 }
       }
     );
+  }
+
+  /**
+   * 创建闪电箭特效 - 电弧抛射物 + 雷电命中爆炸
+   * @param {Object} position - 施法者位置
+   * @param {Object} target - 目标位置
+   * @param {Function} onHit - 命中回调
+   */
+  createLightningArrowEffect(position, target, onHit) {
+    if (!target) return;
+
+    const dx = target.x - position.x;
+    const dy = target.y - position.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 1) {
+      this.createLightningHitEffect(target);
+      if (onHit) onHit(position);
+      return;
+    }
+
+    const speed = 400;
+    const projectile = {
+      position: { ...position },
+      velocity: { x: (dx / dist) * speed, y: (dy / dist) * speed },
+      target: { ...target },
+      elapsed: 0,
+      maxLife: dist / speed,
+      size: 7,
+      color: '#44ccff',
+      shape: 'rect',
+      trailConfig: {
+        position: { ...position },
+        velocity: { x: (Math.random() - 0.5) * 30, y: (Math.random() - 0.5) * 30 },
+        life: 250,
+        size: 5,
+        color: '#88ddff',
+        gravity: 0
+      },
+      onHit: (hitPos) => {
+        this.createLightningHitEffect(hitPos);
+        if (onHit) onHit(hitPos);
+      },
+      completed: false
+    };
+    this.projectiles.push(projectile);
+  }
+
+  /**
+   * 闪电箭命中效果 - 雷电爆炸 + 电弧扩散
+   * @param {Object} position - 命中位置
+   */
+  createLightningHitEffect(position) {
+    // 白色闪光核心
+    this.particleSystem.emitBurst({
+      position: { ...position },
+      velocity: { x: 0, y: 0 },
+      life: 200,
+      size: 8,
+      color: '#ffffff',
+      alpha: 1.0,
+      gravity: 0,
+      friction: 0.85
+    }, 10, {
+      velocityRange: { min: 60, max: 120 },
+      angleRange: { min: 0, max: Math.PI * 2 },
+      sizeRange: { min: 3, max: 8 },
+      lifeRange: { min: 150, max: 300 }
+    });
+    // 蓝色电弧扩散
+    this.particleSystem.emitBurst({
+      position: { ...position },
+      velocity: { x: 0, y: 0 },
+      life: 400,
+      size: 5,
+      color: '#44aaff',
+      alpha: 0.9,
+      gravity: 0,
+      friction: 0.9
+    }, 16, {
+      velocityRange: { min: 40, max: 100 },
+      angleRange: { min: 0, max: Math.PI * 2 },
+      sizeRange: { min: 2, max: 6 },
+      lifeRange: { min: 250, max: 450 }
+    });
+    // 紫色余电
+    this.particleSystem.emitBurst({
+      position: { ...position },
+      velocity: { x: 0, y: 0 },
+      life: 350,
+      size: 3,
+      color: '#aa66ff',
+      alpha: 0.7,
+      gravity: -10,
+      friction: 0.92
+    }, 8, {
+      velocityRange: { min: 20, max: 60 },
+      angleRange: { min: 0, max: Math.PI * 2 },
+      sizeRange: { min: 2, max: 4 },
+      lifeRange: { min: 200, max: 400 }
+    });
+  }
+
+  /**
+   * 创建天降箭雨特效 - 多支箭从天空落下
+   * @param {Object} position - 施法者位置（未使用，箭雨以目标为中心）
+   * @param {Object} target - 目标区域中心
+   * @param {Function} onHit - 命中回调
+   */
+  createArrowRainEffect(position, target, onHit) {
+    if (!target) return;
+
+    const radius = 30;
+    // 20支箭分批从天空落下
+    for (let i = 0; i < 20; i++) {
+      const offsetX = (Math.random() - 0.5) * radius * 2;
+      const offsetY = (Math.random() - 0.5) * radius;
+      const delay = Math.random() * 600;
+      setTimeout(() => {
+        if (!this.particleSystem) return;
+        // 箭矢从高处落下
+        const arrowX = target.x + offsetX;
+        const arrowY = target.y + offsetY - 120;
+        this.particleSystem.emit({
+          position: { x: arrowX, y: arrowY },
+          velocity: { x: (Math.random() - 0.5) * 8, y: 180 + Math.random() * 40 },
+          life: 500,
+          size: 3,
+          color: '#ffcc33',
+          alpha: 0.95,
+          gravity: 60,
+          friction: 0.98
+        });
+        // 箭矢尾迹
+        this.particleSystem.emit({
+          position: { x: arrowX, y: arrowY },
+          velocity: { x: (Math.random() - 0.5) * 5, y: 160 + Math.random() * 30 },
+          life: 300,
+          size: 2,
+          color: '#ff9900',
+          alpha: 0.6,
+          gravity: 50,
+          friction: 0.97
+        });
+      }, delay);
+    }
+    // 落地冲击效果
+    setTimeout(() => {
+      if (!this.particleSystem) return;
+      this.particleSystem.emitBurst({
+        position: { ...target },
+        velocity: { x: 0, y: 0 },
+        life: 400,
+        size: 4,
+        color: '#ff8833',
+        alpha: 0.8,
+        gravity: 30,
+        friction: 0.9
+      }, 20, {
+        velocityRange: { min: 30, max: 70 },
+        angleRange: { min: 0, max: Math.PI * 2 },
+        sizeRange: { min: 2, max: 5 },
+        lifeRange: { min: 250, max: 450 }
+      });
+      // 尘土飞扬
+      this.particleSystem.emitBurst({
+        position: { ...target },
+        velocity: { x: 0, y: 0 },
+        life: 500,
+        size: 3,
+        color: '#998866',
+        alpha: 0.5,
+        gravity: -8,
+        friction: 0.93
+      }, 12, {
+        velocityRange: { min: 15, max: 40 },
+        angleRange: { min: 0, max: Math.PI * 2 },
+        sizeRange: { min: 2, max: 4 },
+        lifeRange: { min: 300, max: 500 }
+      });
+      if (onHit) onHit(target);
+    }, 500);
   }
 
   /**

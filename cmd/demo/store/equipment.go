@@ -70,7 +70,7 @@ func (s *Store) UnequipItem(charID int64, slotType string) error {
 // GetCharEquipments 获取角色已装备的装备
 func (s *Store) GetCharEquipments(charID int64) ([]CharEquipWithDef, error) {
 	rows, err := s.db.Query(
-		`SELECT ce.id, ce.slot_type, ed.id, ed.name, ed.icon_id, ed.slot_type, ed.class, ed.quality, ed.level,
+		`SELECT ce.id, ce.slot_type, ce.quantity, ed.id, ed.name, ed.icon_id, ed.slot_type, ed.class, ed.quality, ed.level,
 		        ed.attack, ed.defense, ed.hp, ed.speed, ed.crit_rate,
 		        ed.pierce, ed.multi_arrow, ed.attack_interval, ed.attack_range, ed.attack_distance
 		 FROM char_equipments ce
@@ -85,7 +85,7 @@ func (s *Store) GetCharEquipments(charID int64) ([]CharEquipWithDef, error) {
 	var result []CharEquipWithDef
 	for rows.Next() {
 		var item CharEquipWithDef
-		if err := rows.Scan(&item.ID, &item.SlotType,
+		if err := rows.Scan(&item.ID, &item.SlotType, &item.Quantity,
 			&item.Def.ID, &item.Def.Name, &item.Def.IconID, &item.Def.SlotType, &item.Def.Class, &item.Def.Quality, &item.Def.Level,
 			&item.Def.Attack, &item.Def.Defense, &item.Def.HP, &item.Def.Speed, &item.Def.CritRate,
 			&item.Def.Pierce, &item.Def.MultiArrow, &item.Def.AttackInterval, &item.Def.AttackRange, &item.Def.AttackDistance); err != nil {
@@ -100,6 +100,7 @@ func (s *Store) GetCharEquipments(charID int64) ([]CharEquipWithDef, error) {
 type CharEquipWithDef struct {
 	ID       int64        `json:"id"`
 	SlotType string       `json:"slot_type"`
+	Quantity int          `json:"quantity"` // 数量（弹药类使用）
 	Def      EquipmentDef `json:"def"`
 }
 

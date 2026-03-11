@@ -1090,11 +1090,10 @@ func (s *DemoServer) npcAITick() {
 		npcID     int64
 		npcName   string
 		targetID  int64
+		target    *PlayerSession
 		damage    float64
 		isCrit    bool
-		targetHP  float64
 		targetMax float64
-		targetDead bool
 		targetName string
 	}
 	var moves []npcMove
@@ -1198,30 +1197,21 @@ func (s *DemoServer) npcAITick() {
 			cdMs := int64(npc.AttackCD * 1000)
 			if now-npc.LastAttackAt >= cdMs {
 				npc.LastAttackAt = now
-				// 计算伤害
+				// 计算伤害（不在锁内扣 HP，延迟到广播时确认 NPC 仍存活后再扣）
 				dmg := calcDamage(npc.Attack, closest.defense)
 				isCrit := rand.Float64() < npc.CritRate
 				if isCrit {
 					dmg *= npc.CritDmg
 				}
 				dmg = math.Round(dmg)
-				closest.hp -= dmg
-				if closest.hp < 0 {
-					closest.hp = 0
-				}
-				dead := closest.hp <= 0
-				if dead {
-					closest.dead = true
-				}
 				attacks = append(attacks, npcAttack{
 					npcID:      npc.ID,
 					npcName:    npc.Name,
 					targetID:   closest.charID,
+					target:     closest,
 					damage:     dmg,
 					isCrit:     isCrit,
-					targetHP:   closest.hp,
 					targetMax:  closest.maxHP,
-					targetDead: dead,
 					targetName: closest.charName,
 				})
 			}
@@ -1281,23 +1271,35 @@ func (s *DemoServer) npcAITick() {
 
 	// 广播 NPC 攻击伤害（再次检查 NPC 是否仍存活，过滤时序竞态产生的幽灵攻击）
 	for _, atk := range attacks {
-		s.arena.mu.RLock()
+		s.arena.mu.Lock()
 		npc, npcAlive := s.arena.npcs[atk.npcID]
 		stillAlive := npcAlive && !npc.Dead
-		s.arena.mu.RUnlock()
 		if !stillAlive {
-			continue // NPC 已被击杀，丢弃此攻击消息
+			s.arena.mu.Unlock()
+			continue // NPC 已被击杀，丢弃此攻击（不扣 HP）
 		}
+		// NPC 仍存活，此时才扣除玩家 HP
+		atk.target.hp -= atk.damage
+		if atk.target.hp < 0 {
+			atk.target.hp = 0
+		}
+		targetHP := atk.target.hp
+		targetDead := atk.target.hp <= 0
+		if targetDead {
+			atk.target.dead = true
+		}
+		s.arena.mu.Unlock()
+
 		s.arena.BroadcastAll(ServerMessage{Type: MsgDamageDealt, Data: map[string]interface{}{
 			"attacker_id":    atk.npcID,
 			"target_id":      atk.targetID,
 			"damage":         atk.damage,
 			"is_crit":        atk.isCrit,
-			"target_hp":      atk.targetHP,
+			"target_hp":      targetHP,
 			"target_max_hp":  atk.targetMax,
 			"attacker_is_npc": true,
 		}})
-		if atk.targetDead {
+		if targetDead {
 			s.arena.BroadcastAll(ServerMessage{Type: MsgPlayerDied, Data: map[string]interface{}{
 				"char_id": atk.targetID,
 				"name":    atk.targetName,

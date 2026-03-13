@@ -238,8 +238,8 @@ export class MeleeAttackSystem {
     // 触发攻击闪光
     this.sectorAttackFlash = 0.2;
     
-    // 生成刀光/箭光特效
-    this.spawnSectorSlashEffect(playerCenter, dir, sectorCenterX, sectorCenterY, sectorRadius);
+    // 生成刀光/箭光特效（含碰撞伤害，单机模式）
+    this.spawnSectorSlashWithDamage(playerCenter, dir, sectorCenterX, sectorCenterY, sectorRadius);
     
     // 播放攻击动画
     const sprite = this.playerEntity.getComponent('sprite');
@@ -269,7 +269,8 @@ export class MeleeAttackSystem {
   }
 
   /**
-   * 生成扇形攻击特效（刀光或箭光）
+   * 生成扇形攻击纯视觉特效（不含碰撞伤害）
+   * 联网模式直接调用此方法，伤害由后端权威计算
    */
   spawnSectorSlashEffect(playerCenter, dir, sectorCenterX, sectorCenterY, sectorRadius) {
     const type = this.sectorIsRanged ? 'arrow' : 'slash';
@@ -285,8 +286,6 @@ export class MeleeAttackSystem {
     const halfAngle = weaponAttackRange / 2;
     
     if (type === 'slash') {
-      const playerStats = this.playerEntity.getComponent('stats');
-      const baseDmg = playerStats ? (playerStats.attack || 15) : 15;
       this.sectorSlashEffects.push({
         cx: sectorCenterX,
         cy: sectorCenterY,
@@ -296,17 +295,14 @@ export class MeleeAttackSystem {
         age: 0,
         maxAge: 0.25,
         type: 'slash',
-        damage: baseDmg,
+        damage: 0,
         hitEntities: []
       });
     } else {
       const speed = 600;
       const rangedRadius = sectorRadius;
-      const playerStats = this.playerEntity.getComponent('stats');
-      const baseDmg = playerStats ? (playerStats.attack || 15) : 15;
       
       const mainhandWeapon = equipComp ? equipComp.getEquipment('mainhand') : null;
-      const pierce = mainhandWeapon?.pierce || 0;
       const multishot = mainhandWeapon?.multishot || 0;
       
       const totalArrows = 1 + multishot;
@@ -329,14 +325,40 @@ export class MeleeAttackSystem {
           age: 0,
           maxAge: rangedRadius / speed + 0.05,
           type: 'arrow',
-          damage: baseDmg,
-          pierce: pierce,
+          damage: 0,
+          pierce: 0,
           pierceCount: 0,
           hitEntities: []
         });
       }
     }
   }
+
+  /**
+   * 生成扇形攻击特效（含碰撞伤害），单机模式使用
+   * 在纯视觉特效基础上，为最近添加的特效对象挂载伤害数据
+   */
+  spawnSectorSlashWithDamage(playerCenter, dir, sectorCenterX, sectorCenterY, sectorRadius) {
+    const prevCount = this.sectorSlashEffects.length;
+    this.spawnSectorSlashEffect(playerCenter, dir, sectorCenterX, sectorCenterY, sectorRadius);
+    
+    // 计算伤害值
+    const playerStats = this.playerEntity.getComponent('stats');
+    const baseDmg = playerStats ? (playerStats.attack || 15) : 15;
+    
+    // 为新增的特效对象挂载伤害数据
+    const equipComp = this.playerEntity?.getComponent('equipment');
+    const mainhandWeapon = equipComp ? equipComp.getEquipment('mainhand') : null;
+    
+    for (let i = prevCount; i < this.sectorSlashEffects.length; i++) {
+      const e = this.sectorSlashEffects[i];
+      e.damage = baseDmg;
+      if (e.type === 'arrow') {
+        e.pierce = mainhandWeapon?.pierce || 0;
+      }
+    }
+  }
+
 
   /**
    * 更新扇形攻击特效
@@ -360,8 +382,8 @@ export class MeleeAttackSystem {
         continue;
       }
       
-      // 剑光碰撞检测
-      if (e.type === 'slash' && e.damage && this.combatSystem) {
+      // 剑光碰撞检测（联网模式下跳过本地伤害，由后端权威计算）
+      if (e.type === 'slash' && e.damage && this.combatSystem && !this._arenaMode) {
         const progress = e.age / e.maxAge;
         const sweepRadius = e.radius * (0.3 + progress * 0.7);
         for (const entity of this.entities) {
@@ -398,7 +420,7 @@ export class MeleeAttackSystem {
         e.x += Math.cos(e.dir) * e.speed * deltaTime;
         e.y += Math.sin(e.dir) * e.speed * deltaTime;
         
-        if (e.damage && this.combatSystem) {
+        if (e.damage && this.combatSystem && !this._arenaMode) {
           const hitRadius = 20;
           for (const entity of this.entities) {
             if (entity.type !== 'enemy') continue;

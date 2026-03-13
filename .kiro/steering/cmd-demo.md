@@ -462,7 +462,7 @@ NPC AI 3 个位置（arena.go npcAITick）：
 
 ### 联网攻击的刀光/箭光特效
 - 联网攻击绕过 `MeleeAttackSystem`，刀光/箭光特效不会自动触发，需在 `attackAllInRange()` 里手动调用
-- 入口：`meleeAttackSystem.spawnSectorSlashEffect(playerCenter, dir, cx, cy, sectorRadius)`
+- 入口：`meleeAttackSystem.spawnSectorSlashEffect(playerCenter, dir, cx, cy, sectorRadius)`（纯视觉，不含碰撞伤害）
 - `playerCenter` = `transform.position` 减去 `spriteHeight/2`（脚底坐标转身体中心）
 - `dir` 有目标时用 `Math.atan2(dy, dx)` 朝目标方向，并同步写入 `meleeAttackSystem.sectorDirection`；无目标时直接读 `sectorDirection`（每帧由 `MeleeAttackSystem.update` 跟随鼠标维护）
 - `sectorRadius` 读 `meleeAttackSystem.sliceAttackRange`
@@ -762,3 +762,51 @@ NPC 死亡后应立即从 `s.arena.npcs` map 中 `delete`，不要只设 `npc.De
 
 ### 后端 seed 数量与前端分配的配合
 前端 `loadBackendEquipments` 分配逻辑：副手取 `min(total, 99)`，剩余全部进背包（按 `maxStack: 99` 自动分组）。要实现"副手 1 捆 + 背包 N 捆"，后端 seed 需给 N+1 捆，前端分配逻辑不用动。
+
+
+## 前端 onDamage "假死"判定 vs doStateSync 权威同步
+
+### 问题链路
+1. `onDamage` 中 `target_is_npc && stats.hp <= 0` 提前把 NPC 标记为 `dead/isDead/isDying`
+2. 但后端 NPC 可能实际还活着（多人并发攻击时，前端收到的 `target_hp` 与后端真实 HP 不同步）
+3. 该 NPC 继续攻击玩家，后端正确扣了玩家 HP 并广播 `damage_dealt`
+4. 前端 `onDamage` 检查到攻击者 NPC 已"死"就 return 忽略——但 `doStateSync`（5Hz）把后端权威 HP 同步过来，覆盖前端的值
+5. 表现为"NPC 已死但玩家还在掉血"
+
+### 核心规律
+- 前端 `onDamage` 的"忽略已死攻击者"防护是无效的——它只阻止了本地 HP 更新，`doStateSync` 会用后端权威值覆盖
+- 前端不应单方面判定 NPC 死亡（`hp<=0` 就标死），NPC 死亡必须以后端 `npc_died` 消息为准
+- 真正的修复必须在后端：确保 NPC 死亡后不再产生攻击。前端的提前标记只用于阻止 CombatSystem 单机复活逻辑，不应影响攻击者有效性判定
+- 如果 NPC 在后端确实还活着，它攻击玩家就是正确行为，前端不应忽略
+
+### 与"幽灵攻击"的区别
+- 幽灵攻击：NPC 在后端已死，但因时序竞态仍发出攻击 → 后端二次检查拦截
+- 假死攻击：NPC 在后端还活着，但前端误判为死亡 → 前端忽略无效，doStateSync 绕过
+
+
+## 刀光/箭光特效：视觉与碰撞伤害已拆分
+
+### 拆分架构
+`spawnSectorSlashEffect` 已拆分为两个方法：
+- `spawnSectorSlashEffect(playerCenter, dir, cx, cy, radius)` — 纯视觉特效，`damage: 0`，不触发碰撞伤害
+- `spawnSectorSlashWithDamage(playerCenter, dir, cx, cy, radius)` — 调用视觉方法后挂载真实 `damage`/`pierce` 数据
+
+### 调用方
+- 联网模式：`NetworkCombatSystem.attackAllInRange` → `spawnSectorSlashEffect`（纯视觉，伤害由后端权威计算）
+- 单机模式：`MeleeAttackSystem.performSectorAttack` → `spawnSectorSlashWithDamage`（视觉 + 碰撞伤害）
+
+### 碰撞检测的双重保险
+`updateSectorSlashEffects` 中碰撞伤害的触发条件：`e.damage && this.combatSystem && !this._arenaMode`
+- 第一层：`e.damage` — 联网模式生成的特效 `damage: 0`（falsy），天然跳过
+- 第二层：`!this._arenaMode` — 场景级开关，联网场景 enter 时设 true
+
+### `_arenaMode` 需要覆盖的完整系统清单
+
+| 系统 | 守卫位置 | 阻断的单机逻辑 |
+|------|---------|--------------|
+| CombatSystem | `handlePlayerDeath` | 单机自动复活 |
+| CombatSystem | `checkDeath` | 非玩家实体的本地死亡判定 |
+| MeleeAttackSystem | `performSectorAttack` 箭矢消耗 | 单机箭矢消耗（联网由 NetworkCombatSystem 管理） |
+| MeleeAttackSystem | `updateSectorSlashEffects` 碰撞伤害 | 刀光/箭矢本地伤害（双重保险，`damage: 0` 已天然跳过） |
+
+新增联网功能时，检查是否有单机系统通过 `super.update()` 调用链对实体造成本地伤害或状态变更，必要时扩展此清单。

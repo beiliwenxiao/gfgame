@@ -1924,6 +1924,9 @@ export class CombatSystem {
       const stats = entity.getComponent('stats');
       if (!stats) continue;
       
+      // 联网模式下，非玩家实体的死亡由后端消息驱动，不走单机 checkDeath
+      if (this._arenaMode && entity.type !== 'player') continue;
+      
       // 检查是否死亡
       if (stats.isDead() && !entity.isDying && !entity.isDead) {
         this.handleDeath(entity);

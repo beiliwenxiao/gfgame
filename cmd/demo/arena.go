@@ -1277,6 +1277,7 @@ func (s *DemoServer) npcAITick() {
 		npc, npcAlive := s.arena.npcs[atk.npcID]
 		stillAlive := npcAlive && !npc.Dead
 		if !stillAlive {
+			log.Printf("[npcAITick] 二次检查拦截幽灵攻击: npcID=%d, npcAlive=%v, targetID=%d", atk.npcID, npcAlive, atk.targetID)
 			if npcAlive && npc.Dead {
 				delete(s.arena.npcs, atk.npcID)
 			}
@@ -1284,6 +1285,7 @@ func (s *DemoServer) npcAITick() {
 			continue // NPC 已被击杀，丢弃此攻击（不扣 HP）
 		}
 		// NPC 仍存活，此时才扣除玩家 HP
+		log.Printf("[npcAITick] NPC %d(%s) 攻击玩家 %d, damage=%.0f, 玩家HP: %.0f -> %.0f", atk.npcID, atk.npcName, atk.targetID, atk.damage, atk.target.hp, atk.target.hp-atk.damage)
 		atk.target.hp -= atk.damage
 		if atk.target.hp < 0 {
 			atk.target.hp = 0

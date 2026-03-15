@@ -52,6 +52,11 @@ export class NetworkCombatSystem {
         if (!selfT) return;
         if (scene.isInSafeZone(selfT.position.x, selfT.position.y)) return;
 
+        const selfSprite = scene.playerEntity.getComponent('sprite');
+        const selfH = selfSprite?.height || 64;
+        const selfCx = selfT.position.x;
+        const selfCy = selfT.position.y - selfH / 10;
+
         const maxRange = this._getWeaponRange();
         let closestId = null;
         let closestDist = maxRange;
@@ -61,9 +66,12 @@ export class NetworkCombatSystem {
             if (entity.dead) continue;
             const t = entity.getComponent('transform');
             if (!t) continue;
-            const dx = t.position.x - selfT.position.x;
-            const dy = t.position.y - selfT.position.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
+            const s = entity.getComponent('sprite');
+            const h = s?.height || 64;
+            const dx = t.position.x - selfCx;
+            const dy = (t.position.y - h / 10) - selfCy;
+            const dy2d = dy * 2;
+            const dist = Math.sqrt(dx * dx + dy2d * dy2d);
             if (dist < closestDist) { closestDist = dist; closestId = id; }
         }
 
@@ -72,9 +80,12 @@ export class NetworkCombatSystem {
             if (entity.dead) continue;
             const t = entity.getComponent('transform');
             if (!t) continue;
-            const dx = t.position.x - selfT.position.x;
-            const dy = t.position.y - selfT.position.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
+            const s = entity.getComponent('sprite');
+            const h = s?.height || 64;
+            const dx = t.position.x - selfCx;
+            const dy = (t.position.y - h / 10) - selfCy;
+            const dy2d = dy * 2;
+            const dist = Math.sqrt(dx * dx + dy2d * dy2d);
             if (dist < closestDist) { closestDist = dist; closestId = id; }
         }
 
@@ -200,6 +211,12 @@ export class NetworkCombatSystem {
         let targetY = transform.position.y;
         let targetId = 0;
 
+        // 攻击圆心：脚下 1/10 高度
+        const selfSpriteCS = scene.playerEntity.getComponent('sprite');
+        const selfHCS = selfSpriteCS?.height || 64;
+        const selfCxCS = transform.position.x;
+        const selfCyCS = transform.position.y - selfHCS / 10;
+
         // circle 类型技能（弓箭手 AOE）：以鼠标世界坐标为目标点
         if (skill && skill.area_type === 'circle' && scene.inputManager && scene.camera) {
             const mouseWorld = scene.inputManager.getMouseWorldPosition(scene.camera);
@@ -208,8 +225,8 @@ export class NetworkCombatSystem {
                 targetY = mouseWorld.y;
             }
             // 范围预判：施法者到目标点的距离不能超过技能 range
-            const dx = targetX - transform.position.x;
-            const dy2d = (targetY - transform.position.y) * 2;
+            const dx = targetX - selfCxCS;
+            const dy2d = (targetY - selfCyCS) * 2;
             const dist = Math.sqrt(dx * dx + dy2d * dy2d);
             if (skill.range > 0 && dist > skill.range) {
                 if (scene.floatingTextManager) {
@@ -251,18 +268,19 @@ export class NetworkCombatSystem {
 
                 // 范围预判（按技能类型）
                 if (skill) {
-                    const sx = transform.position.x;
-                    const sy = transform.position.y;
+                    // 目标脚下 1/10 高度
+                    const tSpriteCS = target.getComponent('sprite');
+                    const tHCS = tSpriteCS?.height || 64;
                     const tx = targetX;
-                    const ty = targetY;
+                    const tyCtr = targetY - tHCS / 10;
                     let inRange = true;
 
                     if (skill.area_type === 'fan') {
                         // 猛击：扇形判定（2.5D，半角 45°）
                         const mas = scene.meleeAttackSystem;
                         const range = skill.range > 0 ? skill.range : (mas ? mas.sliceAttackRange : 100);
-                        const dx = tx - sx;
-                        const dy2d = (ty - sy) * 2;
+                        const dx = tx - selfCxCS;
+                        const dy2d = (tyCtr - selfCyCS) * 2;
                         const dist = Math.sqrt(dx * dx + dy2d * dy2d);
                         if (dist > range) inRange = false;
                         // 扇形角度判定：朝目标方向，半角 45°
@@ -271,9 +289,13 @@ export class NetworkCombatSystem {
                         // 旋风斩/战吼：以玩家为中心的椭圆，不需要选中目标，直接放行
                         inRange = true;
                     } else {
-                        // single / circle：原有逻辑
+                        // single / circle：原有逻辑（用 1/10 高度基准）
                         const combat = scene.playerEntity.getComponent('combat');
-                        if (combat && !combat.isInSkillRange(transform.position, { x: targetX, y: targetY }, skill)) {
+                        if (combat && !combat.isInSkillRange(
+                            { x: selfCxCS, y: selfCyCS },
+                            { x: tx, y: tyCtr },
+                            skill
+                        )) {
                             inRange = false;
                         }
                     }
@@ -598,6 +620,12 @@ export class NetworkCombatSystem {
             if (sectorRadius === maxRange) sectorRadius = mas.sliceAttackRange;
         }
 
+        // 攻击圆心：脚下 1/10 高度
+        const selfSprite = scene.playerEntity.getComponent('sprite');
+        const selfH = selfSprite?.height || 64;
+        const selfCx = selfTransform.position.x;
+        const selfCy = selfTransform.position.y - selfH / 10;
+
         // 收集范围内所有存活目标
         const allTargets = [
             ...Array.from(scene.npcEntities.entries()).map(([id, e]) => ({ id, entity: e, isNPC: true })),
@@ -608,9 +636,11 @@ export class NetworkCombatSystem {
             if (entity.dead) continue;
             const targetTransform = entity.getComponent('transform');
             if (!targetTransform) continue;
+            const tSprite = entity.getComponent('sprite');
+            const tH = tSprite?.height || 64;
 
-            const dx = targetTransform.position.x - selfTransform.position.x;
-            const dy = targetTransform.position.y - selfTransform.position.y;
+            const dx = targetTransform.position.x - selfCx;
+            const dy = (targetTransform.position.y - tH / 10) - selfCy;
             const dy2d = dy * 2; // 还原 2.5D Y 轴压缩
             const dist2d = Math.sqrt(dx * dx + dy2d * dy2d);
             if (dist2d > sectorRadius) continue;
@@ -643,9 +673,11 @@ export class NetworkCombatSystem {
         }
         if (scene.weaponRenderer) {
             if (attacked && firstTargetTransform) {
-                // 有命中目标：朝第一个目标方向
-                const dx = firstTargetTransform.position.x - selfTransform.position.x;
-                const dy = firstTargetTransform.position.y - selfTransform.position.y;
+                // 有命中目标：朝第一个目标方向（用脚下1/10高度基准）
+                const fSprite = this._getTargetEntity(scene.selectedTarget)?.getComponent('sprite');
+                const fH = fSprite?.height || 64;
+                const dx = firstTargetTransform.position.x - selfCx;
+                const dy = (firstTargetTransform.position.y - fH / 10) - selfCy;
                 scene.weaponRenderer.currentMouseAngle = Math.atan2(dy, dx);
             }
             // 无论是否命中目标都触发弯刀特效（无目标时朝当前鼠标方向）
@@ -654,17 +686,17 @@ export class NetworkCombatSystem {
 
         // 触发刀光/箭光特效（复用 MeleeAttackSystem 的扇形特效）
         if (mas && scene.playerEntity) {
-            const sprite = scene.playerEntity.getComponent('sprite');
-            const spriteHeight = sprite?.height || 64;
             const playerCenter = {
-                x: selfTransform.position.x,
-                y: selfTransform.position.y - spriteHeight / 2
+                x: selfCx,
+                y: selfCy
             };
             // 攻击方向：有目标时朝目标，无目标时用当前鼠标方向
             let dir = sectorDir;
             if (attacked && firstTargetTransform) {
-                const dx = firstTargetTransform.position.x - selfTransform.position.x;
-                const dy = firstTargetTransform.position.y - selfTransform.position.y;
+                const fSprite2 = this._getTargetEntity(scene.selectedTarget)?.getComponent('sprite');
+                const fH2 = fSprite2?.height || 64;
+                const dx = firstTargetTransform.position.x - selfCx;
+                const dy = (firstTargetTransform.position.y - fH2 / 10) - selfCy;
                 dir = Math.atan2(dy, dx);
                 mas.sectorDirection = dir;
             }

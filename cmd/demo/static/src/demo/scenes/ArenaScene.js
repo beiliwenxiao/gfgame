@@ -1374,9 +1374,15 @@ export class ArenaScene extends BaseGameScene {
      * 渲染移动目标指示器（2.5D 等距椭圆）
      */
     _renderMoveTargetIndicator(ctx, m) {
+        // progress: 0(刚触发) → 1(结束)
+        const progress = 1 - m.life / m.maxLife;
+        // 淡出：最后 30% 生命周期渐隐
         const alpha = m.life < 0.3 ? m.life / 0.3 : 1;
-        const rx = 12;
-        const ry = 6; // 2.5D 等距：垂直 = 水平 / 2
+
+        // 收缩动画：从大圈缩到小圈
+        const maxRx = 30, minRx = 8;
+        const rx = maxRx - (maxRx - minRx) * progress;
+        const ry = rx / 2; // 2.5D 等距
 
         ctx.save();
         ctx.globalAlpha = alpha * 0.7;
@@ -1388,8 +1394,9 @@ export class ArenaScene extends BaseGameScene {
         ctx.ellipse(m.x, m.y, rx, ry, 0, 0, Math.PI * 2);
         ctx.stroke();
 
-        // 内部填充光晕
-        ctx.fillStyle = 'rgba(0, 255, 136, 0.2)';
+        // 内部填充光晕（随收缩变浓）
+        const fillAlpha = 0.1 + 0.2 * progress;
+        ctx.fillStyle = `rgba(0, 255, 136, ${fillAlpha})`;
         ctx.beginPath();
         ctx.ellipse(m.x, m.y, rx, ry, 0, 0, Math.PI * 2);
         ctx.fill();
@@ -1477,7 +1484,9 @@ export class ArenaScene extends BaseGameScene {
             ctx.globalAlpha = 1.0;
         }
 
-        // 倒计时显示（火堆正上方）
+        // 倒计时显示（仅死亡状态可见）
+        const playerEntity = this.entityManager?.getEntity(this.playerEntityId);
+        if (!playerEntity || !playerEntity.dead) return;
         const countdown = this.campfire.countdown !== undefined ? this.campfire.countdown : 60;
         const fireTopY = y - 75; // 火焰顶部上方
         ctx.save();
@@ -2022,8 +2031,8 @@ export class ArenaScene extends BaseGameScene {
             });
         }
         
-        // 如果是自己击杀的，自动拾取（恢复HP/MP 或增加箭矢）
-        if (data.killer_id === this.selfId && this.playerEntity) {
+        // 如果是自己击杀的且未死亡，自动拾取（恢复HP/MP 或增加箭矢）
+        if (data.killer_id === this.selfId && this.playerEntity && !this.playerEntity.dead) {
             const stats = this.playerEntity.getComponent('stats');
             if (stats) {
                 if (data.drop_type === 'health_potion') {

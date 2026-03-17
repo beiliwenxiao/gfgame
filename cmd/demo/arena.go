@@ -436,6 +436,30 @@ func (s *DemoServer) handleChat(session *PlayerSession, data json.RawMessage) {
 	}})
 }
 
+// handleUsePotion 处理玩家使用药水
+func (s *DemoServer) handleUsePotion(session *PlayerSession, data json.RawMessage) {
+	if !session.inArena || session.dead {
+		return
+	}
+	var req struct {
+		PotionType string `json:"potion_type"` // "health" or "mana"
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		return
+	}
+	switch req.PotionType {
+	case "health":
+		heal := 50.0
+		session.hp = min(session.hp+heal, session.maxHP)
+	case "mana":
+		restore := 30.0
+		session.mp = min(session.mp+restore, session.maxMP)
+	default:
+		return
+	}
+	// HP/MP 变化会通过 doStateSync 自动同步给前端
+}
+
 // respawnPlayerAt 在指定位置复活玩家并广播
 func (s *DemoServer) respawnPlayerAt(session *PlayerSession, x, y float64) {
 	session.x = x
@@ -779,37 +803,14 @@ func (s *DemoServer) getAllNPCStates() []map[string]interface{} {
 	return result
 }
 
-// tryNPCDrop NPC死亡时随机掉落物品（50%几率）
+// tryNPCDrop NPC死亡时必定掉落红瓶或蓝瓶，额外30%几率掉落铁箭
 func (s *DemoServer) tryNPCDrop(npc *ArenaNPC, killerID int64) {
-	if rand.Float64() > 0.5 {
-		return // 50% 不掉落
-	}
+	// 必定掉落：50%红瓶 / 50%蓝瓶
 	dropType := "health_potion"
 	dropName := "红瓶"
-	r := rand.Float64()
-	if r < 0.35 {
-		// 35% 掉红瓶
-		dropType = "health_potion"
-		dropName = "红瓶"
-	} else if r < 0.65 {
-		// 30% 掉蓝瓶
+	if rand.Float64() < 0.5 {
 		dropType = "mana_potion"
 		dropName = "蓝瓶"
-	} else {
-		// 35% 掉木箭（1-50根）
-		arrowCount := rand.Intn(50) + 1
-		dropType = "wood_arrow"
-		dropName = fmt.Sprintf("木箭x%d", arrowCount)
-		s.arena.BroadcastAll(ServerMessage{Type: MsgNPCDrop, Data: map[string]interface{}{
-			"npc_id":      npc.ID,
-			"x":           npc.X,
-			"y":           npc.Y,
-			"drop_type":   dropType,
-			"drop_name":   dropName,
-			"drop_count":  arrowCount,
-			"killer_id":   killerID,
-		}})
-		return
 	}
 	s.arena.BroadcastAll(ServerMessage{Type: MsgNPCDrop, Data: map[string]interface{}{
 		"npc_id":    npc.ID,
@@ -819,6 +820,20 @@ func (s *DemoServer) tryNPCDrop(npc *ArenaNPC, killerID int64) {
 		"drop_name": dropName,
 		"killer_id": killerID,
 	}})
+
+	// 额外30%几率掉落铁箭（1-50根）
+	if rand.Float64() < 0.3 {
+		arrowCount := rand.Intn(50) + 1
+		s.arena.BroadcastAll(ServerMessage{Type: MsgNPCDrop, Data: map[string]interface{}{
+			"npc_id":     npc.ID,
+			"x":          npc.X,
+			"y":          npc.Y,
+			"drop_type":  "iron_arrow",
+			"drop_name":  fmt.Sprintf("铁箭x%d", arrowCount),
+			"drop_count": arrowCount,
+			"killer_id":  killerID,
+		}})
+	}
 }
 
 // handleAttackNPC 处理玩家攻击 NPC

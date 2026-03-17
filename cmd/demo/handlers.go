@@ -37,6 +37,8 @@ func (s *DemoServer) handleMessage(session *PlayerSession, msg ClientMessage) {
 		s.handleCastSkillNPC(session, msg.Data)
 	case MsgChat:
 		s.handleChat(session, msg.Data)
+	case MsgUsePotion:
+		s.handleUsePotion(session, msg.Data)
 	case MsgGetCharInfo:
 		s.handleGetCharInfo(session)
 	case MsgGetEquipList:

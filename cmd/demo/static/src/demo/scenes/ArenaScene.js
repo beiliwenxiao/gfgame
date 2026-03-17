@@ -76,6 +76,9 @@ export class ArenaScene extends BaseGameScene {
         // 右键移动目标指示器 [{x, y, life, maxLife}]
         this.moveTargetIndicators = [];
 
+        // 地面掉落物品 [{x, y, life, maxLife, dropType, dropName, dropCount, killerId}]
+        this.groundDrops = [];
+
         // 联网战斗系统
         this.networkCombat = new NetworkCombatSystem(this);
     }
@@ -443,6 +446,47 @@ export class ArenaScene extends BaseGameScene {
         this.boneCorpses = this.boneCorpses.filter(b => {
             b.life -= deltaTime;
             return b.life > 0;
+        });
+
+        // 更新地面掉落物品（倒计时 + 按E键/左键拾取）
+        if (this.playerEntity && !this.playerEntity.dead && this.inputManager) {
+            const pt = this.playerEntity.getComponent('transform');
+            if (pt) {
+                const px = pt.position.x, py = pt.position.y;
+                const ePressed = this.inputManager.isKeyPressed('e') || this.inputManager.isKeyPressed('E');
+                const leftClicked = this.inputManager.isMouseClicked() && this.inputManager.getMouseButton() === 0;
+                if (ePressed || leftClicked) {
+                    console.log('[Pickup] 触发拾取检测, groundDrops:', this.groundDrops.length, 'ePressed:', ePressed, 'leftClicked:', leftClicked, 'px:', px.toFixed(0), 'py:', py.toFixed(0));
+                    // 找范围内最近的未拾取掉落物
+                    let nearest = null, nearestDist = 60;
+                    for (const drop of this.groundDrops) {
+                        if (drop.picked) continue;
+                        const dx = drop.x - px, dy = drop.y - py;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        console.log('[Pickup] 掉落物:', drop.dropType, 'dist:', dist.toFixed(1), 'drop.x:', drop.x.toFixed(0), 'drop.y:', drop.y.toFixed(0));
+                        if (dist < nearestDist) {
+                            // 左键点击时额外检查鼠标是否在掉落物附近
+                            if (leftClicked) {
+                                const mouseWorld = this.inputManager.getMouseWorldPosition(this.camera);
+                                if (mouseWorld) {
+                                    const mdx = drop.x - mouseWorld.x, mdy = drop.y - mouseWorld.y;
+                                    if (Math.sqrt(mdx * mdx + mdy * mdy) > 30) continue;
+                                }
+                            }
+                            nearest = drop;
+                            nearestDist = dist;
+                        }
+                    }
+                    if (nearest) {
+                        this._pickupGroundDrop(nearest);
+                        if (leftClicked) this.inputManager.markMouseClickHandled();
+                    }
+                }
+            }
+        }
+        this.groundDrops = this.groundDrops.filter(d => {
+            d.life -= deltaTime;
+            return d.life > 0 && !d.picked;
         });
 
         // 检测右键点击 → 添加移动目标指示器
@@ -1160,6 +1204,17 @@ export class ArenaScene extends BaseGameScene {
             });
         }
 
+        // 添加地面掉落物品
+        for (const drop of this.groundDrops) {
+            if (!drop.picked) {
+                renderQueue.push({
+                    type: 'drop',
+                    y: drop.y,
+                    render: () => this._renderGroundDrop(ctx, drop)
+                });
+            }
+        }
+
         // 添加移动目标指示器
         for (const m of this.moveTargetIndicators) {
             renderQueue.push({
@@ -1520,6 +1575,19 @@ export class ArenaScene extends BaseGameScene {
         ctx.textBaseline = 'middle';
         ctx.fillText(cdText, x, bgY + bgH / 2);
         ctx.restore();
+    }
+
+    /**
+     * 覆盖父类药水使用，发送消息给后端同步 HP/MP
+     */
+    usePotionFromHotbar(potionType) {
+        if (!this.playerEntity || this.playerEntity.dead) return;
+        // 调用父类逻辑（从背包扣除药水 + 本地恢复 HP/MP）
+        super.usePotionFromHotbar(potionType);
+        // 通知后端同步 HP/MP
+        if (this.ws) {
+            this.ws.send('use_potion', { potion_type: potionType });
+        }
     }
 
     /**
@@ -1999,21 +2067,25 @@ export class ArenaScene extends BaseGameScene {
      */
     onNPCDrop(data) {
         if (!data) return;
-        
-        // 显示掉落文字
-        if (this.floatingTextManager) {
-            const color = data.drop_type === 'health_potion' ? '#ff4444' : '#4488ff';
-            this.floatingTextManager.addText(
-                data.x,
-                data.y - 30,
-                `掉落 ${data.drop_name}`,
-                color
-            );
-        }
-        
+        console.log('[NPC Drop]', JSON.stringify(data));
+
+        // 在地面生成掉落物品（所有玩家都能看到，15秒后消失）
+        this.groundDrops.push({
+            x: data.x + (Math.random() - 0.5) * 30,
+            y: data.y + (Math.random() - 0.5) * 15,
+            life: 15,
+            maxLife: 15,
+            dropType: data.drop_type,
+            dropName: data.drop_name,
+            dropCount: data.drop_count || 1,
+            killerId: data.killer_id,
+            picked: false
+        });
+
         // 掉落粒子效果
         if (this.particleSystem) {
-            const color = data.drop_type === 'health_potion' ? '#ff3333' : '#3388ff';
+            const pColorMap = { health_potion: '#ff3333', mana_potion: '#3388ff', iron_arrow: '#88aacc' };
+            const color = pColorMap[data.drop_type] || '#3388ff';
             this.particleSystem.emitBurst({
                 position: { x: data.x, y: data.y },
                 velocity: { x: 0, y: -20 },
@@ -2030,70 +2102,142 @@ export class ArenaScene extends BaseGameScene {
                 lifeRange: { min: 400, max: 600 }
             });
         }
-        
-        // 如果是自己击杀的且未死亡，自动拾取（恢复HP/MP 或增加箭矢）
-        if (data.killer_id === this.selfId && this.playerEntity && !this.playerEntity.dead) {
-            const stats = this.playerEntity.getComponent('stats');
-            if (stats) {
-                if (data.drop_type === 'health_potion') {
-                    const heal = Math.floor(stats.maxHp * 0.2);
-                    stats.hp = Math.min(stats.maxHp, stats.hp + heal);
-                    if (this.floatingTextManager) {
-                        const transform = this.playerEntity.getComponent('transform');
-                        if (transform) {
-                            this.floatingTextManager.addText(
-                                transform.position.x,
-                                transform.position.y - 20,
-                                `+${heal} HP`,
-                                '#44ff44'
-                            );
-                        }
-                    }
-                } else if (data.drop_type === 'mana_potion') {
-                    const mana = Math.floor(stats.maxMp * 0.2);
-                    stats.mp = Math.min(stats.maxMp, stats.mp + mana);
-                    if (this.floatingTextManager) {
-                        const transform = this.playerEntity.getComponent('transform');
-                        if (transform) {
-                            this.floatingTextManager.addText(
-                                transform.position.x,
-                                transform.position.y - 20,
-                                `+${mana} MP`,
-                                '#44aaff'
-                            );
-                        }
-                    }
-                } else if (data.drop_type === 'wood_arrow') {
-                    // 木箭：加入 offhand 弹药数量
-                    const equipment = this.playerEntity.getComponent('equipment');
-                    if (equipment) {
-                        const offhand = equipment.getEquipment('offhand');
-                        const count = data.drop_count || 1;
-                        if (offhand && offhand.subType === 'ammo') {
-                            offhand.quantity = (offhand.quantity || 0) + count;
-                        } else {
-                            // 没有弹药槽，创建木箭条目
-                            equipment.equip('offhand', {
-                                id: 'wooden_arrow', name: '木箭', type: 'ammo', subType: 'ammo',
-                                rarity: 0, level: 1, quantity: count,
-                                stats: { attack: 0, defense: 0, maxHp: 0, speed: 0 }
-                            });
-                        }
-                        if (this.floatingTextManager) {
-                            const transform = this.playerEntity.getComponent('transform');
-                            if (transform) {
-                                this.floatingTextManager.addText(
-                                    transform.position.x,
-                                    transform.position.y - 20,
-                                    `+${count} 木箭`,
-                                    '#88ccff'
-                                );
-                            }
-                        }
-                    }
+    }
+
+    /**
+     * 拾取地面掉落物品（玩家靠近时自动拾取）
+     */
+    _pickupGroundDrop(drop) {
+        if (!this.playerEntity || this.playerEntity.dead) return;
+        drop.picked = true;
+        const transform = this.playerEntity.getComponent('transform');
+        const inventory = this.playerEntity.getComponent('inventory');
+
+        if (drop.dropType === 'health_potion') {
+            // 红瓶加入背包
+            if (inventory) {
+                inventory.addItem({
+                    id: 'health_potion', name: '红瓶', type: 'consumable', subType: 'health_potion',
+                    maxStack: 20, usable: true, rarity: 0,
+                    effect: { type: 'heal', value: 50 },
+                    stats: {}
+                }, 1);
+            }
+            if (this.floatingTextManager && transform) {
+                this.floatingTextManager.addText(transform.position.x, transform.position.y - 20, '+1 红瓶', '#ff4444');
+            }
+        } else if (drop.dropType === 'mana_potion') {
+            // 蓝瓶加入背包
+            if (inventory) {
+                inventory.addItem({
+                    id: 'mana_potion', name: '蓝瓶', type: 'consumable', subType: 'mana_potion',
+                    maxStack: 20, usable: true, rarity: 0,
+                    effect: { type: 'restore_mana', value: 30 },
+                    stats: {}
+                }, 1);
+            }
+            if (this.floatingTextManager && transform) {
+                this.floatingTextManager.addText(transform.position.x, transform.position.y - 20, '+1 蓝瓶', '#4488ff');
+            }
+        } else if (drop.dropType === 'wood_arrow' || drop.dropType === 'iron_arrow') {
+            const equipment = this.playerEntity.getComponent('equipment');
+            if (equipment) {
+                const offhand = equipment.getEquipment('offhand');
+                const count = drop.dropCount || 1;
+                const isIron = drop.dropType === 'iron_arrow';
+                const arrowName = isIron ? '铁箭' : '木箭';
+                const arrowId = isIron ? 'iron_arrow' : 'wooden_arrow';
+                if (offhand && offhand.subType === 'ammo') {
+                    offhand.quantity = (offhand.quantity || 0) + count;
+                } else {
+                    equipment.equip('offhand', {
+                        id: arrowId, name: arrowName, type: 'ammo', subType: 'ammo',
+                        rarity: 0, level: 1, quantity: count,
+                        stats: { attack: 0, defense: 0, maxHp: 0, speed: 0 }
+                    });
+                }
+                if (this.floatingTextManager && transform) {
+                    this.floatingTextManager.addText(transform.position.x, transform.position.y - 20, `+${count} ${arrowName}`, '#88ccff');
                 }
             }
         }
+    }
+
+    /**
+     * 渲染地面掉落物品
+     */
+    _renderGroundDrop(ctx, drop) {
+        const x = drop.x;
+        const y = drop.y;
+
+        // 淡出：最后3秒渐隐
+        const alpha = drop.life < 3 ? drop.life / 3 : 1;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+
+        // 物品光圈（地面椭圆光晕）
+        const colorMap = { health_potion: 'rgba(255,60,60,', mana_potion: 'rgba(60,100,255,', iron_arrow: 'rgba(140,200,220,' };
+        const baseColor = colorMap[drop.dropType] || 'rgba(255,255,100,';
+        const pulse = 0.6 + 0.4 * Math.sin(performance.now() / 300);
+
+        ctx.beginPath();
+        ctx.ellipse(x, y, 12, 6, 0, 0, Math.PI * 2);
+        ctx.fillStyle = baseColor + (0.3 * pulse) + ')';
+        ctx.fill();
+
+        // 物品图标
+        if (drop.dropType === 'health_potion') {
+            // 红瓶
+            ctx.fillStyle = '#cc2222';
+            ctx.fillRect(x - 4, y - 14, 8, 12);
+            ctx.fillStyle = '#ff4444';
+            ctx.fillRect(x - 3, y - 13, 6, 10);
+            ctx.fillStyle = '#884400';
+            ctx.fillRect(x - 2, y - 16, 4, 3);
+            // 十字
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(x - 1, y - 11, 2, 6);
+            ctx.fillRect(x - 3, y - 9, 6, 2);
+        } else if (drop.dropType === 'mana_potion') {
+            // 蓝瓶
+            ctx.fillStyle = '#2244cc';
+            ctx.fillRect(x - 4, y - 14, 8, 12);
+            ctx.fillStyle = '#4488ff';
+            ctx.fillRect(x - 3, y - 13, 6, 10);
+            ctx.fillStyle = '#884400';
+            ctx.fillRect(x - 2, y - 16, 4, 3);
+            // 星号
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(x - 1, y - 11, 2, 6);
+            ctx.fillRect(x - 3, y - 9, 6, 2);
+        } else if (drop.dropType === 'iron_arrow') {
+            // 铁箭
+            ctx.strokeStyle = '#aabbcc';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(x, y - 16);
+            ctx.lineTo(x, y - 2);
+            ctx.stroke();
+            // 箭头
+            ctx.fillStyle = '#ccddee';
+            ctx.beginPath();
+            ctx.moveTo(x, y - 18);
+            ctx.lineTo(x - 3, y - 14);
+            ctx.lineTo(x + 3, y - 14);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // 物品名称
+        ctx.font = '9px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+        ctx.lineWidth = 2;
+        ctx.strokeText(drop.dropName, x, y + 10);
+        ctx.fillText(drop.dropName, x, y + 10);
+
+        ctx.restore();
     }
 
     /**
@@ -2170,6 +2314,7 @@ export class ArenaScene extends BaseGameScene {
         this.skillRangeIndicators = [];
         this.boneCorpses = [];
         this.moveTargetIndicators = [];
+        this.groundDrops = [];
         this._hideSoulOverlay();
         if (this.combatSystem) {
             this.combatSystem._arenaMode = false;

@@ -558,7 +558,7 @@ export class MeleeAttackSystem {
     const sprite = this.playerEntity.getComponent('sprite');
     const spriteHeight = sprite?.height || 64;
     const cx = transform.position.x;
-    const cy = transform.position.y - spriteHeight / 2;
+    const cy = transform.position.y - spriteHeight / 10;
     
     ctx.save();
     

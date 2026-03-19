@@ -20,14 +20,13 @@ export class NetworkCombatSystem {
     // ─── 辅助：获取目标实体 ───
     _getTargetEntity(targetId) {
         if (!targetId) return null;
-        const isNPC = targetId < 0;
-        return isNPC
-            ? this.scene.npcEntities.get(targetId)
-            : this.scene.remotePlayers.get(targetId);
+        const npc = this.scene.npcEntities.get(targetId);
+        if (npc) return npc;
+        return this.scene.remotePlayers.get(targetId);
     }
 
     _isNPCTarget(targetId) {
-        return targetId < 0;
+        return this.scene.npcEntities.has(targetId);
     }
 
     // ─── 辅助：获取武器攻击范围 ───
@@ -238,7 +237,7 @@ export class NetworkCombatSystem {
             if (scene.selectedTarget) {
                 targetId = scene.selectedTarget;
             }
-            const isNPC = scene.selectedTarget && scene.selectedTarget < 0;
+            const isNPC = scene.selectedTarget && this._isNPCTarget(scene.selectedTarget);
             const msgType = isNPC ? 'cast_skill_npc' : 'cast_skill';
             scene.ws.send(msgType, { skill_id: skillId, target_id: targetId, target_x: targetX, target_y: targetY });
 
@@ -255,7 +254,41 @@ export class NetworkCombatSystem {
             return;
         }
 
-        const isNPC = scene.selectedTarget && scene.selectedTarget < 0;
+        // fan 类型（猛击）：朝鼠标方向的扇形 AOE，不依赖 selectedTarget
+        if (skill && skill.area_type === 'fan') {
+            const mas = scene.meleeAttackSystem;
+            // 用鼠标世界坐标作为方向目标点（与普攻 sectorDirection 一致）
+            if (scene.inputManager && scene.camera) {
+                const mouseWorld = scene.inputManager.getMouseWorldPosition(scene.camera);
+                if (mouseWorld) {
+                    targetX = mouseWorld.x;
+                    targetY = mouseWorld.y;
+                }
+            } else if (mas) {
+                // fallback：用 sectorDirection 反算目标点
+                const dir = mas.sectorDirection;
+                const range = skill.range > 0 ? skill.range : (mas.sliceAttackRange || 100);
+                targetX = selfCxCS + Math.cos(dir) * range;
+                targetY = selfCyCS + Math.sin(dir) * range / 2;
+            }
+            // fan 是 AOE，发 cast_skill_npc（后端遍历范围内所有 NPC）
+            scene.ws.send('cast_skill_npc', { skill_id: skillId, target_id: 0, target_x: targetX, target_y: targetY });
+            if (skill) {
+                scene.skillCooldowns[skillId] = now + skill.cooldown * 1000;
+                const combat = scene.playerEntity.getComponent('combat');
+                if (combat) {
+                    const combatSkillId = `backend_${skillId}`;
+                    combat.skillCooldowns.set(combatSkillId, performance.now());
+                    combat.startSkillPipeline({
+                        ...skill,
+                        phaseDurations: { windup: 100, hit: 50, settle: 50, recovery: 200 }
+                    });
+                }
+            }
+            return;
+        }
+
+        const isNPC = scene.selectedTarget && this._isNPCTarget(scene.selectedTarget);
         if (scene.selectedTarget) {
             const target = this._getTargetEntity(scene.selectedTarget);
             if (target) {
@@ -266,30 +299,19 @@ export class NetworkCombatSystem {
                 }
                 targetId = scene.selectedTarget;
 
-                // 范围预判（按技能类型）
+                // 范围预判（ellipse/single/circle）
                 if (skill) {
-                    // 目标脚下 1/10 高度
                     const tSpriteCS = target.getComponent('sprite');
                     const tHCS = tSpriteCS?.height || 64;
                     const tx = targetX;
                     const tyCtr = targetY - tHCS / 10;
                     let inRange = true;
 
-                    if (skill.area_type === 'fan') {
-                        // 猛击：扇形判定（2.5D，半角 45°）
-                        const mas = scene.meleeAttackSystem;
-                        const range = skill.range > 0 ? skill.range : (mas ? mas.sliceAttackRange : 100);
-                        const dx = tx - selfCxCS;
-                        const dy2d = (tyCtr - selfCyCS) * 2;
-                        const dist = Math.sqrt(dx * dx + dy2d * dy2d);
-                        if (dist > range) inRange = false;
-                        // 扇形角度判定：朝目标方向，半角 45°
-                        // 前端发送时 target 就是选中目标，方向即为目标方向，直接用距离判定即可
-                    } else if (skill.area_type === 'ellipse') {
+                    if (skill.area_type === 'ellipse') {
                         // 旋风斩/战吼：以玩家为中心的椭圆，不需要选中目标，直接放行
                         inRange = true;
                     } else {
-                        // single / circle：原有逻辑（用 1/10 高度基准）
+                        // single / circle
                         const combat = scene.playerEntity.getComponent('combat');
                         if (combat && !combat.isInSkillRange(
                             { x: selfCxCS, y: selfCyCS },
